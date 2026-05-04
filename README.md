@@ -436,7 +436,7 @@ temperature = 1.0
 
 [routing]
 default = "none"            # "none" = only @mentions trigger agents
-max_agent_hops = 4          # pause after N agent-to-agent messages
+max_agent_hops = 100        # pause after N agent-to-agent messages
 
 [mcp]
 http_port = 8200            # MCP streamable-http (Claude Code, Codex)
@@ -476,6 +476,85 @@ python wrapper.py claude \
 Relative paths resolve against the shell's current directory (not agentchattr's install location), so `./.agentchattr` ends up inside your project folder.
 
 Server and wrappers share the same `AGENTCHATTR_*` env vars and the same flag names, so a launcher/profile can run multiple isolated instances by passing matching values to each process. If no flags or env vars are set, `config.toml` is used exactly as before — zero change for existing setups.
+
+### Project teams
+
+For repeatable per-project rosters, create a team file in `teams/<project>.toml` and start it with:
+
+```bash
+./ac project-a up
+./ac project-a status
+./ac project-a attach architect
+./ac project-a down
+```
+
+`ac project-a up` starts the server in a project-specific tmux session, then starts one wrapper per configured agent. CLI agents run in their own tmux sessions using the configured names, roles, labels, colors, ports, and data directory.
+
+Tmux sessions use a predictable naming convention:
+
+- `{tmux_prefix}-server` — the FastAPI/MCP server
+- `{tmux_prefix}-<agent>` — the live agent CLI session to attach to
+- `{tmux_prefix}-wrap-<agent>` — the wrapper supervisor for that agent
+
+For normal manual intervention, attach to the live agent session:
+
+```bash
+./ac project-a attach architect
+```
+
+Use `./ac project-a attach wrapper:architect` only when debugging the wrapper process itself.
+
+Example `teams/project-a.toml`:
+
+```toml
+[project]
+name = "project-a"
+tmux_prefix = "agentchattr-project-a"
+
+[server]
+port = 8301
+host = "127.0.0.1"
+data_dir = "./data/project-a"
+
+[mcp]
+http_port = 8211
+sse_port = 8212
+
+[images]
+upload_dir = "./uploads/project-a"
+
+[routing]
+default = "none"
+max_agent_hops = 100
+
+[agents.architect]
+provider = "claude"
+cwd = ".."
+color = "#da7756"
+label = "Architect"
+role = "Planner"
+
+[agents.builder]
+provider = "codex"
+cwd = ".."
+color = "#10a37f"
+label = "Builder"
+role = "Builder"
+
+[agents.research]
+provider = "gemini"
+cwd = ".."
+color = "#4285f4"
+label = "Research"
+role = "Researcher"
+```
+
+`provider` selects the built-in wrapper behavior for aliases, so `provider = "claude"` works even when the handle is `architect`. If `command` is omitted, it defaults to the provider name. The team file's `[agents]` section replaces the default roster for that project.
+
+Under the hood, `ac` sets `AGENTCHATTR_PROJECT_CONFIG` and `AGENTCHATTR_TMUX_PREFIX`. You can use `AGENTCHATTR_PROJECT_CONFIG=/path/to/team.toml python run.py` directly if you want to start the server by hand.
+
+See [`TEAM_RUNNER_GUIDE.md`](TEAM_RUNNER_GUIDE.md) for the full operating guide and
+[`PROJECT_PLAN.md`](PROJECT_PLAN.md) for the roadmap.
 
 ### API agents (local models)
 

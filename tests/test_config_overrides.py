@@ -7,6 +7,7 @@ same env vars produce the same config regardless of entry point.
 
 import os
 import sys
+import tempfile
 import unittest
 from pathlib import Path
 
@@ -23,6 +24,7 @@ ENV_VARS = [
     "AGENTCHATTR_MCP_HTTP_PORT",
     "AGENTCHATTR_MCP_SSE_PORT",
     "AGENTCHATTR_UPLOAD_DIR",
+    "AGENTCHATTR_PROJECT_CONFIG",
 ]
 
 
@@ -108,6 +110,39 @@ class ConfigOverrideTests(unittest.TestCase):
         # Agent definitions must be untouched by path/port overrides
         self.assertIn("claude", config["agents"])
         self.assertEqual(config["agents"]["claude"]["command"], "claude")
+
+    def test_project_config_replaces_agent_roster_and_merges_settings(self):
+        with tempfile.TemporaryDirectory() as tmp:
+            project_cfg = Path(tmp) / "project-a.toml"
+            project_cfg.write_text(
+                """
+[server]
+port = 8301
+data_dir = "./data/project-a"
+
+[mcp]
+http_port = 8211
+sse_port = 8212
+
+[agents.architect]
+provider = "claude"
+label = "Architect"
+role = "Planner"
+color = "#da7756"
+""".strip(),
+                "utf-8",
+            )
+            os.environ["AGENTCHATTR_PROJECT_CONFIG"] = str(project_cfg)
+
+            config = config_loader.load_config(ROOT)
+
+        self.assertEqual(config["server"]["port"], 8301)
+        self.assertEqual(config["mcp"]["http_port"], 8211)
+        self.assertEqual(config["mcp"]["sse_port"], 8212)
+        self.assertEqual(list(config["agents"].keys()), ["architect"])
+        self.assertEqual(config["agents"]["architect"]["provider"], "claude")
+        self.assertEqual(config["agents"]["architect"]["command"], "claude")
+        self.assertEqual(config["agents"]["architect"]["role"], "Planner")
 
 
 class CliOverrideExtractionTests(unittest.TestCase):

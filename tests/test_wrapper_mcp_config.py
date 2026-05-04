@@ -15,7 +15,7 @@ ROOT = Path(__file__).resolve().parents[1]
 if str(ROOT) not in sys.path:
     sys.path.insert(0, str(ROOT))
 
-from wrapper import _write_json_mcp_settings  # noqa: E402
+from wrapper import _resolve_mcp_inject, _write_json_mcp_settings  # noqa: E402
 
 
 class JsonMcpSettingsTests(unittest.TestCase):
@@ -105,6 +105,26 @@ class ExpanduserPathTests(unittest.TestCase):
         raw = ".qwen/settings.json"
         expanded = Path(raw).expanduser()
         self.assertFalse(expanded.is_absolute())
+
+
+class ProviderAliasDefaultsTests(unittest.TestCase):
+    def test_claude_alias_uses_claude_mcp_defaults(self):
+        cfg = _resolve_mcp_inject("architect", {"provider": "claude"})
+        self.assertEqual(cfg["mcp_inject"], "flag")
+        self.assertEqual(cfg["mcp_flag"], "--mcp-config")
+
+    def test_codex_alias_uses_codex_mcp_defaults(self):
+        cfg = _resolve_mcp_inject("builder", {"provider": "codex"})
+        self.assertEqual(cfg["mcp_inject"], "proxy_flag")
+
+    def test_explicit_mcp_inject_still_wins(self):
+        cfg = _resolve_mcp_inject("architect", {
+            "provider": "claude",
+            "mcp_inject": "settings_file",
+            "mcp_settings_path": ".custom/settings.json",
+        })
+        self.assertEqual(cfg["mcp_inject"], "settings_file")
+        self.assertEqual(cfg["mcp_settings_path"], ".custom/settings.json")
 
 
 if __name__ == "__main__":

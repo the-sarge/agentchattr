@@ -164,12 +164,13 @@ _VALID_INJECT_MODES = {"settings_file", "env", "flag", "proxy_flag", "env_conten
 
 
 def _resolve_mcp_inject(agent: str, agent_cfg: dict) -> dict:
-    """Resolve MCP injection config: explicit agent_cfg > built-in defaults > None."""
+    """Resolve MCP injection config: explicit agent_cfg > provider defaults > None."""
     inject_mode = agent_cfg.get("mcp_inject")
     if inject_mode:
         return dict(agent_cfg)
-    if agent in _BUILTIN_DEFAULTS:
-        merged = dict(_BUILTIN_DEFAULTS[agent])
+    provider = str(agent_cfg.get("provider", agent)).strip().lower()
+    if provider in _BUILTIN_DEFAULTS:
+        merged = dict(_BUILTIN_DEFAULTS[provider])
         merged.update({k: v for k, v in agent_cfg.items() if k.startswith("mcp_")})
         return merged
     return {}
@@ -575,6 +576,8 @@ def main():
     parser.add_argument("agent", choices=agent_names, help=f"Agent to wrap ({', '.join(agent_names)})")
     parser.add_argument("--no-restart", action="store_true", help="Do not restart on exit")
     parser.add_argument("--label", type=str, default=None, help="Custom display label")
+    parser.add_argument("--detach", action="store_true", help="Start the agent tmux session without attaching")
+    parser.add_argument("--tmux-prefix", default=None, help="Prefix for Unix tmux session names")
     # Per-project isolation flags (must match the server's flags so wrappers
     # launched separately connect to the right instance). Values are consumed
     # by apply_cli_overrides() above; listing here so --help shows them.
@@ -588,7 +591,8 @@ def main():
     agent = args.agent
     agent_cfg = config.get("agents", {}).get(agent, {})
     cwd = agent_cfg.get("cwd", ".")
-    command = agent_cfg.get("command", agent)
+    provider = str(agent_cfg.get("provider", agent)).strip().lower()
+    command = agent_cfg.get("command", provider or agent)
     data_dir = ROOT / config.get("server", {}).get("data_dir", "./data")
     data_dir.mkdir(parents=True, exist_ok=True)
     server_port = config.get("server", {}).get("port", 8300)
@@ -715,7 +719,7 @@ def main():
 
     # Gemini: ensure the project directory is trusted so MCPs are allowed.
     # Gemini blocks ALL MCPs for untrusted folders — even system-settings ones.
-    if agent == "gemini" or inject_cfg.get("mcp_inject") == "env":
+    if provider == "gemini" or agent == "gemini" or inject_cfg.get("mcp_inject") == "env":
         _ensure_gemini_folder_trusted(project_dir)
 
     launch_args, env, inject_env, mcp_settings_path = _build_provider_launch(
@@ -868,7 +872,8 @@ def main():
     else:
         from wrapper_unix import get_activity_checker, run_agent
 
-        unix_session_name = f"agentchattr-{assigned_name}"
+        tmux_prefix = args.tmux_prefix or os.environ.get("AGENTCHATTR_TMUX_PREFIX", "")
+        unix_session_name = f"{tmux_prefix}-{assigned_name}" if tmux_prefix else f"agentchattr-{assigned_name}"
         _set_activity_checker(get_activity_checker(unix_session_name, trigger_flag=_trigger_flag))
 
     run_kwargs = dict(
@@ -890,6 +895,7 @@ def main():
         run_kwargs["enter_backend"] = agent_cfg.get("enter_backend", "console_input")
     if sys.platform != "win32":
         run_kwargs["session_name"] = unix_session_name
+        run_kwargs["attach"] = not args.detach
 
     try:
         run_agent(**run_kwargs)

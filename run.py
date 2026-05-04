@@ -80,6 +80,10 @@ def main():
     mcp_bridge._load_cursors()
     mcp_bridge._ROLES_FILE = data_dir / "roles.json"
     mcp_bridge._load_roles()
+    for name, agent_cfg in config.get("agents", {}).items():
+        role = str(agent_cfg.get("role", "")).strip()[:20]
+        if role:
+            mcp_bridge.set_role(name, role)
 
     # Start MCP servers in background threads
     http_port = config.get("mcp", {}).get("http_port", 8200)
@@ -164,4 +168,3 @@ def main():
 
 if __name__ == "__main__":
     main()
-

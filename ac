@@ -1,0 +1,315 @@
+#!/usr/bin/env python3
+"""agentchattr project/team runner.
+
+Usage:
+    ./ac project-a up
+    ./ac project-a status
+    ./ac project-a attach architect
+    ./ac project-a down
+
+By default, project-a resolves to teams/project-a.toml.
+"""
+
+from __future__ import annotations
+
+import argparse
+import os
+import re
+import shlex
+import shutil
+import socket
+import subprocess
+import sys
+import time
+import tomllib
+from pathlib import Path
+
+
+ROOT = Path(__file__).resolve().parent
+
+
+def _slug(value: str) -> str:
+    slug = re.sub(r"[^a-zA-Z0-9_.-]+", "-", value.strip()).strip("-")
+    return slug or "default"
+
+
+def _find_team_file(project: str, explicit: str | None = None) -> Path:
+    candidates: list[Path] = []
+    if explicit:
+        candidates.append(Path(explicit))
+    else:
+        raw = Path(project)
+        if raw.suffix == ".toml" or raw.exists():
+            candidates.append(raw)
+        candidates.extend([
+            ROOT / "teams" / f"{project}.toml",
+            ROOT / "projects" / f"{project}.toml",
+            ROOT / f"{project}.toml",
+        ])
+
+    for candidate in candidates:
+        candidate = candidate.expanduser()
+        if not candidate.is_absolute():
+            candidate = (Path.cwd() / candidate).resolve()
+        if candidate.exists():
+            return candidate
+
+    searched = "\n  ".join(str(c) for c in candidates)
+    raise SystemExit(f"Team file not found. Searched:\n  {searched}")
+
+
+def _load_toml(path: Path) -> dict:
+    with open(path, "rb") as f:
+        return tomllib.load(f)
+
+
+def _project_name(project_arg: str, team: dict, path: Path) -> str:
+    project = team.get("project", {})
+    return str(project.get("name") or project_arg or path.stem)
+
+
+def _tmux_prefix(project_arg: str, team: dict, path: Path) -> str:
+    project = team.get("project", {})
+    explicit = project.get("tmux_prefix")
+    if explicit:
+        return _slug(str(explicit))
+    return f"agentchattr-{_slug(_project_name(project_arg, team, path))}"
+
+
+def _server_port(team: dict) -> int:
+    return int(team.get("server", {}).get("port", 8300))
+
+
+def _agent_names(team: dict) -> list[str]:
+    agents = team.get("agents", {})
+    if not isinstance(agents, dict) or not agents:
+        raise SystemExit("Team file must define at least one [agents.<name>] entry.")
+    return list(agents.keys())
+
+
+def _agent_is_api(team: dict, agent: str) -> bool:
+    cfg = team.get("agents", {}).get(agent, {})
+    return str(cfg.get("type", "")).lower() == "api"
+
+
+def _check_tmux() -> None:
+    if shutil.which("tmux"):
+        return
+    raise SystemExit("tmux is required. Install it first, then retry.")
+
+
+def _tmux_session_exists(name: str) -> bool:
+    result = subprocess.run(["tmux", "has-session", "-t", name], capture_output=True)
+    return result.returncode == 0
+
+
+def _tmux_sessions() -> list[str]:
+    result = subprocess.run(
+        ["tmux", "list-sessions", "-F", "#{session_name}"],
+        capture_output=True,
+        text=True,
+    )
+    if result.returncode != 0:
+        return []
+    return [line.strip() for line in result.stdout.splitlines() if line.strip()]
+
+
+def _start_tmux_session(name: str, command: str) -> None:
+    subprocess.check_call([
+        "tmux", "new-session", "-d", "-s", name, "-c", str(ROOT), command,
+    ])
+
+
+def _kill_tmux_session(name: str) -> None:
+    subprocess.run(["tmux", "kill-session", "-t", name], capture_output=True)
+
+
+def _port_open(port: int) -> bool:
+    with socket.socket(socket.AF_INET, socket.SOCK_STREAM) as sock:
+        sock.settimeout(0.2)
+        return sock.connect_ex(("127.0.0.1", port)) == 0
+
+
+def _wait_for_port(port: int, timeout: float = 30.0) -> bool:
+    deadline = time.time() + timeout
+    while time.time() < deadline:
+        if _port_open(port):
+            return True
+        time.sleep(0.5)
+    return False
+
+
+def _ensure_venv() -> Path:
+    venv_python = ROOT / ".venv" / ("Scripts/python.exe" if sys.platform == "win32" else "bin/python")
+    if venv_python.exists():
+        return venv_python
+
+    print("Creating .venv and installing dependencies...")
+    subprocess.check_call([sys.executable, "-m", "venv", str(ROOT / ".venv")])
+    subprocess.check_call([
+        str(venv_python), "-m", "pip", "install", "-q", "-r", str(ROOT / "requirements.txt"),
+    ])
+    return venv_python
+
+
+def _env_for_project(team_file: Path, prefix: str) -> dict[str, str]:
+    env = dict(os.environ)
+    env["AGENTCHATTR_PROJECT_CONFIG"] = str(team_file)
+    env["AGENTCHATTR_TMUX_PREFIX"] = prefix
+    return env
+
+
+def _shell_command(env: dict[str, str], args: list[str]) -> str:
+    env_keys = ["AGENTCHATTR_PROJECT_CONFIG", "AGENTCHATTR_TMUX_PREFIX"]
+    env_parts = [f"{key}={shlex.quote(env[key])}" for key in env_keys if key in env]
+    return "env " + " ".join(env_parts + [shlex.quote(str(arg)) for arg in args])
+
+
+def _project_context(args) -> tuple[Path, dict, str, str, int, list[str]]:
+    team_file = _find_team_file(args.project, args.file)
+    team = _load_toml(team_file)
+    name = _project_name(args.project, team, team_file)
+    prefix = _tmux_prefix(args.project, team, team_file)
+    port = _server_port(team)
+    agents = _agent_names(team)
+    return team_file, team, name, prefix, port, agents
+
+
+def up(args) -> None:
+    if sys.platform == "win32":
+        raise SystemExit("ac project up currently supports tmux-based Mac/Linux launches.")
+
+    _check_tmux()
+    team_file, team, name, prefix, port, agents = _project_context(args)
+    python = _ensure_venv()
+    env = _env_for_project(team_file, prefix)
+
+    server_session = f"{prefix}-server"
+    if _tmux_session_exists(server_session):
+        print(f"Server already running: {server_session}")
+    elif _port_open(port):
+        print(f"Port {port} is already listening; leaving server tmux session stopped.")
+    else:
+        command = _shell_command(env, [python, "run.py"])
+        _start_tmux_session(server_session, command)
+        print(f"Started server: {server_session}")
+        if not _wait_for_port(port):
+            raise SystemExit(f"Server did not start on port {port}. Check: tmux attach -t {server_session}")
+
+    for agent in agents:
+        wrapper_session = f"{prefix}-wrap-{_slug(agent)}"
+        if _tmux_session_exists(wrapper_session):
+            print(f"Agent wrapper already running: {wrapper_session}")
+            continue
+
+        wrapper = "wrapper_api.py" if _agent_is_api(team, agent) else "wrapper.py"
+        cmd_args = [python, wrapper, agent]
+        if wrapper == "wrapper.py":
+            cmd_args.extend(["--detach", "--tmux-prefix", prefix])
+        command = _shell_command(env, cmd_args)
+        _start_tmux_session(wrapper_session, command)
+        print(f"Started {agent}: wrapper={wrapper_session}, agent={prefix}-{agent}")
+
+    print(f"\n{name} is up: http://127.0.0.1:{port}")
+    print(f"Team file: {team_file}")
+    print(f"Sessions: tmux list-sessions | grep {shlex.quote(prefix)}")
+
+
+def down(args) -> None:
+    _check_tmux()
+    team_file, team, name, prefix, _port, _agents = _project_context(args)
+    matches = [s for s in _tmux_sessions() if s == prefix or s.startswith(prefix + "-")]
+    if not matches:
+        print(f"No tmux sessions found for {name} ({prefix}).")
+        return
+    for session in sorted(matches, reverse=True):
+        _kill_tmux_session(session)
+        print(f"Stopped {session}")
+
+
+def _print_attach_help(prefix: str, agents: list[str]) -> None:
+    print("Attach targets:")
+    print(f"  server            tmux attach -t {prefix}-server")
+    for agent in agents:
+        print(f"  {agent:<16} tmux attach -t {prefix}-{agent}")
+    print()
+    print("Wrapper supervisor sessions are available as wrapper:<agent> when debugging orchestration.")
+
+
+def status(args) -> None:
+    _check_tmux()
+    team_file, team, name, prefix, port, agents = _project_context(args)
+    sessions = [s for s in _tmux_sessions() if s == prefix or s.startswith(prefix + "-")]
+    print(f"{name}")
+    print(f"Team file: {team_file}")
+    print(f"Web UI: http://127.0.0.1:{port} ({'listening' if _port_open(port) else 'not listening'})")
+    server_session = f"{prefix}-server"
+    print(f"Server: {'running' if server_session in sessions else 'stopped'} ({server_session})")
+    print("Agent sessions:")
+    for agent in agents:
+        agent_session = f"{prefix}-{agent}"
+        wrapper_session = f"{prefix}-wrap-{_slug(agent)}"
+        agent_state = "running" if agent_session in sessions else "stopped"
+        wrapper_state = "wrapper running" if wrapper_session in sessions else "wrapper stopped"
+        print(f"  {agent:<16} {agent_state:<8} {agent_session}  ({wrapper_state})")
+    extra = sorted(
+        s for s in sessions
+        if s != server_session
+        and not any(s == f"{prefix}-{agent}" or s == f"{prefix}-wrap-{_slug(agent)}" for agent in agents)
+    )
+    if extra:
+        print("Other sessions:")
+        for session in extra:
+            print(f"  {session}")
+    print()
+    print(f"Attach: ./ac {args.project} attach <agent>")
+
+
+def attach(args) -> None:
+    _check_tmux()
+    _team_file, _team, name, prefix, _port, agents = _project_context(args)
+    target = (args.target or "").strip()
+    if not target:
+        print(f"{name}")
+        _print_attach_help(prefix, agents)
+        raise SystemExit(2)
+
+    if target == "server":
+        session = f"{prefix}-server"
+    elif target.startswith(("wrapper:", "wrap:")):
+        agent = target.split(":", 1)[1]
+        session = f"{prefix}-wrap-{_slug(agent)}"
+    elif target in agents:
+        session = f"{prefix}-{target}"
+    else:
+        session = target
+
+    if not _tmux_session_exists(session):
+        print(f"tmux session not found: {session}")
+        print()
+        _print_attach_help(prefix, agents)
+        raise SystemExit(1)
+
+    subprocess.call(["tmux", "attach-session", "-t", session])
+
+
+def main() -> None:
+    parser = argparse.ArgumentParser(description="Start/stop project-specific agentchattr teams.")
+    parser.add_argument("project", help="Project name or path to a team TOML file")
+    parser.add_argument("action", choices=("up", "down", "status", "attach"))
+    parser.add_argument("target", nargs="?", help="Attach target: agent name, server, or wrapper:<agent>")
+    parser.add_argument("-f", "--file", help="Explicit team TOML file")
+    args = parser.parse_args()
+
+    if args.action == "up":
+        up(args)
+    elif args.action == "down":
+        down(args)
+    elif args.action == "attach":
+        attach(args)
+    else:
+        status(args)
+
+
+if __name__ == "__main__":
+    main()

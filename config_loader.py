@@ -12,6 +12,7 @@ isolated instances per project without editing the repo's config file.
   AGENTCHATTR_MCP_HTTP_PORT   → mcp.http_port         (int)
   AGENTCHATTR_MCP_SSE_PORT    → mcp.sse_port          (int)
   AGENTCHATTR_UPLOAD_DIR      → images.upload_dir
+  AGENTCHATTR_PROJECT_CONFIG  → extra TOML config overlay for one project/team
 
 Relative paths in env var overrides resolve against the current working
 directory (where the user invoked the command from), not agentchattr's
@@ -24,6 +25,18 @@ import tomllib
 from pathlib import Path
 
 ROOT = Path(__file__).parent
+PROJECT_CONFIG_ENV = "AGENTCHATTR_PROJECT_CONFIG"
+
+_PROVIDER_COMMANDS = {
+    "claude": "claude",
+    "codex": "codex",
+    "gemini": "gemini",
+    "kimi": "kimi",
+    "qwen": "qwen",
+    "kilo": "kilo",
+    "codebuddy": "codebuddy",
+    "copilot": "copilot",
+}
 
 
 # Mapping: env var name → (config section, key, is_int)
@@ -100,6 +113,51 @@ def _apply_env_overrides(config: dict) -> None:
         config.setdefault(section, {})[key] = value
 
 
+def _merge_project_config(config: dict, project_config: dict) -> None:
+    """Merge a project/team config overlay into the base config.
+
+    Project configs intentionally replace the agent roster when they define
+    [agents.*]. That lets a team file be authoritative for "which agents should
+    exist for this project" instead of inheriting the default roster.
+    """
+    for section, value in project_config.items():
+        if section == "agents":
+            config["agents"] = dict(value)
+            continue
+        if isinstance(value, dict) and isinstance(config.get(section), dict):
+            config[section].update(value)
+        else:
+            config[section] = value
+
+
+def _load_project_config(config: dict) -> None:
+    raw = os.environ.get(PROJECT_CONFIG_ENV, "").strip()
+    if not raw:
+        return
+
+    path = Path(raw).expanduser()
+    if not path.is_absolute():
+        path = (Path.cwd() / path).resolve()
+    with open(path, "rb") as f:
+        project_config = tomllib.load(f)
+    _merge_project_config(config, project_config)
+
+
+def _normalize_agent_defaults(config: dict) -> None:
+    """Fill implied fields for provider-based agent aliases.
+
+    Team configs commonly use a stable handle such as [agents.architect] with
+    provider = "claude". The wrapper still needs a concrete command, so infer
+    command = "claude" when it is not specified.
+    """
+    for cfg in config.get("agents", {}).values():
+        if not isinstance(cfg, dict):
+            continue
+        provider = str(cfg.get("provider", "")).strip().lower()
+        if provider and "command" not in cfg and provider in _PROVIDER_COMMANDS:
+            cfg["command"] = _PROVIDER_COMMANDS[provider]
+
+
 def load_config(root: Path | None = None) -> dict:
     """Load config.toml and merge config.local.toml if it exists.
 
@@ -132,6 +190,8 @@ def load_config(root: Path | None = None) -> dict:
             else:
                 print(f"  Warning: Ignoring local agent '{name}' (already defined in config.toml)")
 
+    _load_project_config(config)
+    _normalize_agent_defaults(config)
     _apply_env_overrides(config)
 
     return config

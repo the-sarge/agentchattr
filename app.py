@@ -1244,7 +1244,7 @@ async def websocket_endpoint(websocket: WebSocket):
                 if "max_agent_hops" in new:
                     try:
                         hops = int(new["max_agent_hops"])
-                        hops = max(1, min(hops, 50))
+                        hops = max(1, min(hops, 100))
                         room_settings["max_agent_hops"] = hops
                         router.max_hops = hops
                     except (ValueError, TypeError):
@@ -2093,6 +2093,9 @@ async def register_agent(request: Request):
         return JSONResponse({"error": f"unknown base: {base}"}, status_code=400)
     # Touch presence so the instance doesn't immediately time out
     import mcp_bridge
+    seeded_role = str(config.get("agents", {}).get(base, {}).get("role", "")).strip()[:20]
+    if seeded_role:
+        mcp_bridge.set_role(result["name"], seeded_role)
     with mcp_bridge._presence_lock:
         mcp_bridge._presence[result["name"]] = __import__("time").time()
     # If slot 1 was renamed (e.g. "claude" → "claude-1"), migrate state

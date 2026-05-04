@@ -93,6 +93,7 @@ def run_agent(
     session_name=None,
     inject_env=None,
     inject_delay: float = 0.3,
+    attach: bool = True,
 ):
     """Run agent inside a tmux session, inject via tmux send-keys."""
     _check_tmux()
@@ -145,6 +146,13 @@ def run_agent(
             )
             if result.returncode != 0:
                 print(f"  Error: failed to create tmux session (exit {result.returncode})")
+                break
+
+            if not attach:
+                print(f"  Started detached. {agent.capitalize()} is running in tmux.")
+                print(f"  Reattach: tmux attach -t {session_name}")
+                while _session_exists(session_name):
+                    time.sleep(1)
                 break
 
             # Attach — blocks until agent exits or user detaches (Ctrl+B, D)

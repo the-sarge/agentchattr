@@ -1,0 +1,89 @@
+[project]
+name = "project-a"
+tmux_prefix = "agentchattr-project-a"
+
+[server]
+port = 8301
+host = "127.0.0.1"
+data_dir = "./data/project-a"
+
+[mcp]
+http_port = 8211
+sse_port = 8212
+
+[images]
+upload_dir = "./uploads/project-a"
+
+[routing]
+default = "none"
+max_agent_hops = 100
+
+[agents.claude-planner]
+provider = "claude"
+cwd = ".."
+color = "#da7756"
+label = "Claude Planner"
+role = "Planner"
+
+[agents.claude-builder]
+provider = "claude"
+cwd = ".."
+color = "#10a37f"
+label = "Claude Builder"
+role = "Builder"
+
+[agents.claude-reviewer]
+provider = "claude"
+cwd = ".."
+color = "#8b5cf6"
+label = "Claude Reviewer"
+role = "Reviewer"
+
+[agents.claude-tester]
+provider = "claude"
+cwd = ".."
+color = "#f59e0b"
+label = "Claude Tester"
+role = "Tester"
+
+[agents.claude-docs]
+provider = "claude"
+cwd = ".."
+color = "#3b82f6"
+label = "Claude Docs"
+role = "Docs"
+
+[agents.codex-builder]
+provider = "codex"
+cwd = ".."
+color = "#14b8a6"
+label = "Codex Builder"
+role = "Builder"
+
+[agents.codex-reviewer]
+provider = "codex"
+cwd = ".."
+color = "#ef4444"
+label = "Codex Reviewer"
+role = "Reviewer"
+
+[agents.codex-tester]
+provider = "codex"
+cwd = ".."
+color = "#84cc16"
+label = "Codex Tester"
+role = "Tester"
+
+[agents.codex-docs]
+provider = "codex"
+cwd = ".."
+color = "#06b6d4"
+label = "Codex Docs"
+role = "Docs"
+
+[agents.gemini-research]
+provider = "gemini"
+cwd = ".."
+color = "#4285f4"
+label = "Gemini Research"
+role = "Researcher"
