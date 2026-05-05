@@ -185,12 +185,7 @@
     }
 
     function handleMessageActionClick(event) {
-        const rawTarget = event.target;
-        const target = rawTarget instanceof Element
-            ? rawTarget
-            : rawTarget instanceof Node
-                ? rawTarget.parentElement
-                : null;
+        const target = event.target instanceof Element ? event.target : null;
         if (!target) return;
         const actionEl = target.closest('[data-message-action]');
         const messages = document.getElementById('messages');

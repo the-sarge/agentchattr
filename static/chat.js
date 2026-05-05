@@ -2231,7 +2231,7 @@ let deleteDragging = false;
 
 function deleteClick(msgId, event) {
     event.stopPropagation();
-    enterDeleteMode(msgId);
+    enterDeleteMode(Number(msgId));
 }
 
 function enterDeleteMode(initialId) {
