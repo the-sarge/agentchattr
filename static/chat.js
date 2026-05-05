@@ -26,6 +26,7 @@ let channelUnread = {};  // { channelName: count }
 let agentHats = {};  // { agent_name: svg_string }
 window.customRoles = [];  // saved custom roles from settings
 let colorOverrides = JSON.parse(localStorage.getItem('agentchattr-color-overrides') || '{}');
+let schedulesModuleMissingNotified = false;
 
 // Expose globals that extracted modules (sessions.js, jobs.js) read via window.*
 // Using defineProperty so live values are always returned.
@@ -98,6 +99,14 @@ function enableDragScroll(el) {
         e.preventDefault();
         el.scrollLeft = scrollLeft - (e.pageX - el.offsetLeft - startX);
     });
+}
+
+function reportSchedulesModuleUnavailable(context) {
+    console.error(`Schedules module unavailable for ${context}`);
+    if (!schedulesModuleMissingNotified) {
+        schedulesModuleMissingNotified = true;
+        showSlashHint('Schedules module failed to load - refresh required');
+    }
 }
 
 // Settings UI and notification sound preferences live in settings.js.
@@ -453,15 +462,15 @@ function connectWebSocket() {
             updateAllHats();
         } else if (event.type === 'schedules') {
             if (window.Schedules && typeof window.Schedules.setSchedules === 'function') {
-                window.Schedules.setSchedules(event.data || []);
+                window.Schedules.setSchedules(event.data);
             } else {
-                console.error('Schedules module unavailable for schedules event');
+                reportSchedulesModuleUnavailable('schedules event');
             }
         } else if (event.type === 'schedule') {
             if (window.Schedules && typeof window.Schedules.handleScheduleEvent === 'function') {
                 window.Schedules.handleScheduleEvent(event.action, event.data);
             } else {
-                console.error('Schedules module unavailable for schedule event');
+                reportSchedulesModuleUnavailable('schedule event');
             }
         } else if (event.type === 'pending_instance') {
             // A new 2nd+ instance registered — queue naming lightbox
@@ -2682,7 +2691,7 @@ function buildMentionToggles() {
             if (typeof window.updateSchedulePopoverState === 'function') {
                 window.updateSchedulePopoverState();
             } else {
-                console.error('Schedules module unavailable for mention toggle update');
+                reportSchedulesModuleUnavailable('mention toggle update');
             }
         };
         container.appendChild(btn);

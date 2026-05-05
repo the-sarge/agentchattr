@@ -1,9 +1,11 @@
 // schedules.js -- scheduled message strip and composer popover
-// Extracted from chat.js. Reads shared chat state through window.* transition bridges.
+// Extracted from chat.js. Reads shared state through window.* transition bridges
+// and publishes window.Schedules plus inline-handler aliases for existing HTML.
 
 (function() {
     'use strict';
 
+    // schedules.js owns this list; chat.js syncs it through setSchedules/events.
     let schedulesList = [];
 
     function reportMissingBridge(name) {
@@ -16,8 +18,31 @@
 
     function getActiveMentions() {
         const mentions = window.activeMentions;
-        if (!mentions) reportMissingBridge('window.activeMentions');
-        return mentions && typeof mentions[Symbol.iterator] === 'function' ? mentions : [];
+        if (!mentions) {
+            reportMissingBridge('window.activeMentions');
+            return [];
+        }
+        if (typeof mentions[Symbol.iterator] !== 'function') {
+            console.error('Schedules: window.activeMentions is not iterable', mentions);
+            return [];
+        }
+        return mentions;
+    }
+
+    function getActiveChannel() {
+        if (typeof window.activeChannel !== 'string' || !window.activeChannel) {
+            reportMissingBridge('window.activeChannel');
+            return null;
+        }
+        return window.activeChannel;
+    }
+
+    function getUsername() {
+        if (typeof window.username !== 'string' || !window.username) {
+            reportMissingBridge('window.username');
+            return null;
+        }
+        return window.username;
     }
 
     function repositionScrollAnchor() {
@@ -45,11 +70,20 @@
     }
 
     function setSchedules(schedules) {
-        schedulesList = Array.isArray(schedules) ? schedules : [];
+        if (!Array.isArray(schedules)) {
+            console.error('Schedules: setSchedules received non-array payload', schedules);
+            schedulesList = [];
+        } else {
+            schedulesList = schedules;
+        }
         renderSchedulesBar();
     }
 
     function handleScheduleEvent(action, schedule) {
+        if (!schedule || schedule.id == null) {
+            console.error('Schedules: invalid schedule event payload', action, schedule);
+            return;
+        }
         if (action === 'create') {
             schedulesList = schedulesList.filter(s => s.id !== schedule.id);
             schedulesList.push(schedule);
@@ -57,6 +91,9 @@
             schedulesList = schedulesList.map(s => s.id === schedule.id ? schedule : s);
         } else if (action === 'delete') {
             schedulesList = schedulesList.filter(s => s.id !== schedule.id);
+        } else {
+            console.error('Schedules: unknown event action', action, schedule);
+            return;
         }
         renderSchedulesBar();
     }
@@ -82,6 +119,10 @@
 
         // Clean up inline controls from previous render
         const summaryDiv = bar.querySelector('.schedules-bar-summary');
+        if (!summaryDiv) {
+            console.error('Schedules: schedules summary container missing');
+            return;
+        }
         summaryDiv.querySelector('.schedule-toggle-inline')?.remove();
         summaryDiv.querySelector('.schedule-delete-inline')?.remove();
 
@@ -403,6 +444,12 @@
         const timeVal = getScheduleTime24();
         const intervalVal = parseInt(document.getElementById('sched-interval-val')?.value) || 1;
         const intervalUnit = document.getElementById('sched-interval-unit')?.value || 'hours';
+        const activeChannel = getActiveChannel();
+        const username = getUsername();
+        if (!activeChannel || !username) {
+            showSlashHint('Schedule setup is incomplete - refresh required');
+            return;
+        }
 
         // Build spec for the API
         let spec;
@@ -420,9 +467,9 @@
             const body = {
                 prompt: prompt,
                 targets: [...targets],
-                channel: window.activeChannel,
+                channel: activeChannel,
                 spec: spec,
-                created_by: window.username,
+                created_by: username,
             };
             if (!recurring) body.one_shot = true;
             if (!recurring && dateVal) body.send_at_date = dateVal;
