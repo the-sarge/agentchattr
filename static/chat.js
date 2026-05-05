@@ -35,9 +35,12 @@ Object.defineProperty(window, 'activeChannel', { get() { return activeChannel; }
 Object.defineProperty(window, 'channelList', { get() { return channelList; }, set(v) { channelList = v; } });
 Object.defineProperty(window, 'channelUnread', { get() { return channelUnread; }, set(v) { channelUnread = v; } });
 window._setActiveChannel = function(v) { activeChannel = v; };
-window._setPendingChannelSwitch = function(v) { pendingChannelSwitch = v; };
 // scrollToBottom is set after function definition (see below)
 Object.defineProperty(window, 'username', { get() { return username; } });
+window._setUsername = function(v) {
+    username = v;
+    rememberSelfName(username);
+};
 Object.defineProperty(window, 'agentConfig', { get() { return agentConfig; } });
 // Cross-module read bridge for search-nav filters; chat.js remains the owner.
 Object.defineProperty(window, 'todos', { get() { return todos; } });
@@ -97,97 +100,7 @@ function enableDragScroll(el) {
     });
 }
 
-// --- Notification sounds ---
-const SOUND_OPTIONS = [
-    { value: 'soft-chime', label: 'Soft Chime' },
-    { value: 'bright-ping', label: 'Bright Ping' },
-    { value: 'gentle-pop', label: 'Gentle Pop' },
-    { value: 'alert-tone', label: 'Alert Tone' },
-    { value: 'pluck', label: 'Pluck' },
-    { value: 'click', label: 'Click' },
-    { value: 'warm-bell', label: 'Warm Bell' },
-    { value: 'none', label: 'None' },
-];
-const DEFAULT_SOUND = 'soft-chime';
-const CROSS_CHANNEL_SOUND = 'pluck';
-let soundPrefs = JSON.parse(localStorage.getItem('agentchattr-sounds') || '{}');
-const soundCache = {};
-
-function playNotificationSound(sender) {
-    const key = sender.toLowerCase();
-    const soundName = soundPrefs[key] || soundPrefs['default'] || DEFAULT_SOUND;
-    if (soundName === 'none') return;
-    if (!soundCache[soundName]) {
-        soundCache[soundName] = new Audio(`/static/sounds/${soundName}.mp3`);
-    }
-    const audio = soundCache[soundName];
-    audio.currentTime = 0;
-    audio.play().catch(() => {});  // ignore autoplay policy errors
-}
-
-function playCrossChannelSound() {
-    const soundName = soundPrefs['cross-channel'] || CROSS_CHANNEL_SOUND;
-    if (soundName === 'none') return;
-    if (!soundCache[soundName]) {
-        soundCache[soundName] = new Audio(`/static/sounds/${soundName}.mp3`);
-    }
-    const audio = soundCache[soundName];
-    audio.currentTime = 0;
-    audio.play().catch(() => {});
-}
-window.playCrossChannelSound = playCrossChannelSound;
-
-function buildSoundSettings() {
-    const container = document.getElementById('sound-settings');
-    if (!container) return;
-    container.innerHTML = '';
-
-    // Default sound + cross-channel sound + per-agent rows
-    const agents = ['default', 'cross-channel', ...Object.keys(agentConfig)];
-    for (const name of agents) {
-        const row = document.createElement('div');
-        row.className = 'sound-row';
-        const label = document.createElement('span');
-        label.className = 'sound-label';
-        label.textContent = name === 'default' ? 'Default sound'
-            : name === 'cross-channel' ? 'Background alerts'
-            : (agentConfig[name]?.label || name);
-        const select = document.createElement('select');
-        select.className = 'sound-select';
-        select.dataset.agent = name;
-        const currentVal = soundPrefs[name]
-            || (name === 'default' ? DEFAULT_SOUND : name === 'cross-channel' ? CROSS_CHANNEL_SOUND : '');
-        for (const opt of SOUND_OPTIONS) {
-            const o = document.createElement('option');
-            o.value = opt.value;
-            o.textContent = opt.label;
-            if (currentVal === opt.value) o.selected = true;
-            select.appendChild(o);
-        }
-        // Add "Use default" option for per-agent rows (not default or cross-channel)
-        if (name !== 'default' && name !== 'cross-channel') {
-            const o = document.createElement('option');
-            o.value = '';
-            o.textContent = 'Use default';
-            if (!soundPrefs[name]) o.selected = true;
-            select.insertBefore(o, select.firstChild);
-        }
-        // Preview on change
-        select.addEventListener('change', () => {
-            const val = select.value;
-            soundPrefs[name] = val;
-            localStorage.setItem('agentchattr-sounds', JSON.stringify(soundPrefs));
-            if (val && val !== 'none') {
-                if (!soundCache[val]) soundCache[val] = new Audio(`/static/sounds/${val}.mp3`);
-                soundCache[val].currentTime = 0;
-                soundCache[val].play().catch(() => {});
-            }
-        });
-        row.appendChild(label);
-        row.appendChild(select);
-        container.appendChild(row);
-    }
-}
+// Settings UI and notification sound preferences live in settings.js.
 
 // Real brand logo SVGs from Bootstrap Icons (MIT licensed)
 const BRAND_AVATARS = {
@@ -273,7 +186,7 @@ function init() {
     setupDragDrop();
     setupPaste();
     setupScroll();
-    setupSettingsKeys();
+    window.setupSettingsKeys();
     setupKeyboardShortcuts();
     RulesPanel.init();
     Jobs.init();
@@ -433,7 +346,7 @@ function connectWebSocket() {
         } else if (event.type === 'message') {
             // Play notification sound for new messages from others (not joins, not when focused)
             if (soundEnabled && !document.hasFocus() && event.data.type !== 'join' && event.data.type !== 'leave' && event.data.type !== 'summary' && event.data.sender && !isSelfSender(event.data.sender)) {
-                playNotificationSound(event.data.sender);
+                window.playNotificationSound(event.data.sender);
             }
             appendMessage(event.data);
         } else if (event.type === 'agent_renamed') {
@@ -526,7 +439,7 @@ function connectWebSocket() {
         } else if (event.type === 'typing') {
             updateTyping(event.agent, event.active);
         } else if (event.type === 'settings') {
-            applySettings(event.data);
+            window.applySettings(event.data);
         } else if (event.type === 'delete') {
             handleDeleteBroadcast(event.ids);
         } else if (event.type === 'rules' || event.type === 'decisions') {
@@ -860,7 +773,7 @@ function appendMessage(msg) {
             renderChannelTabs();
             // Play soft pluck for cross-channel chat messages from others (only when focused)
             if (document.hasFocus() && msg.type === 'chat' && msg.sender && !isSelfSender(msg.sender)) {
-                playCrossChannelSound();
+                window.playCrossChannelSound();
             }
         }
     }
@@ -983,7 +896,7 @@ function applyAgentConfig(data) {
     }
     buildStatusPills();
     buildMentionToggles();
-    buildSoundSettings();
+    window.buildSoundSettings();
     // Re-color any messages already rendered (e.g. from a reconnect)
     recolorMessages();
     updateJobReplyTargetUI();
@@ -1758,69 +1671,7 @@ function updateTyping(agent, active) {
     }
 }
 
-// --- Settings ---
-
-let pendingChannelSwitch = null;
-
-function applySettings(data) {
-    if (data.title) {
-        document.getElementById('room-title').textContent = data.title;
-        if (!window.agentchattrProjectTitle) document.title = data.title;
-    }
-    if (data.username) {
-        username = data.username;
-        rememberSelfName(username);
-        document.getElementById('sender-label').textContent = username;
-        document.getElementById('setting-username').value = username;
-    }
-    if (data.font) {
-        document.body.classList.remove('font-mono', 'font-serif', 'font-sans');
-        document.body.classList.add('font-' + data.font);
-        document.getElementById('setting-font').value = data.font;
-    }
-    if (data.max_agent_hops !== undefined) {
-        document.getElementById('setting-hops').value = data.max_agent_hops;
-    }
-    if (data.history_limit !== undefined) {
-        document.getElementById('setting-history').value = String(data.history_limit);
-    }
-    if (data.contrast) {
-        document.body.classList.toggle('high-contrast', data.contrast === 'high');
-        document.getElementById('setting-contrast').value = data.contrast;
-    }
-    if (data.rules_refresh_interval !== undefined) {
-        document.getElementById('setting-rules-refresh').value = String(data.rules_refresh_interval);
-    }
-    if (Array.isArray(data.custom_roles)) {
-        window.customRoles = data.custom_roles;
-    }
-    if (data.channels && Array.isArray(data.channels)) {
-        channelList = data.channels;
-        // If active channel was deleted, switch to general
-        if (!channelList.includes(activeChannel)) {
-            activeChannel = 'general';
-            localStorage.setItem('agentchattr-channel', 'general');
-            Store.set('activeChannel', 'general');
-            filterMessagesByChannel();
-        }
-        renderChannelTabs();
-
-        if (pendingChannelSwitch && channelList.includes(pendingChannelSwitch)) {
-            const name = pendingChannelSwitch;
-            pendingChannelSwitch = null;
-            switchChannel(name);
-        }
-    }
-}
-
-function toggleSettings() {
-    const bar = document.getElementById('settings-bar');
-    bar.classList.toggle('hidden');
-    document.getElementById('settings-toggle').classList.toggle('active', !bar.classList.contains('hidden'));
-    if (!bar.classList.contains('hidden')) {
-        document.getElementById('setting-username').focus();
-    }
-}
+// Settings UI and persistence live in settings.js.
 
 function _clearClearChatConfirm() {
     const btn = document.getElementById('clear-chat-btn');
@@ -1887,64 +1738,6 @@ function clearChat() {
     };
 
     setTimeout(() => document.addEventListener('click', _clearChatOutsideClick, true), 0);
-}
-
-function saveSettings() {
-    const newUsername = document.getElementById('setting-username').value.trim();
-    const newFont = document.getElementById('setting-font').value;
-    const newHops = document.getElementById('setting-hops').value;
-    const histVal = document.getElementById('setting-history').value;
-    const newHistory = histVal === 'all' ? 'all' : (parseInt(histVal) || 50);
-    const newContrast = document.getElementById('setting-contrast').value;
-    const newRulesRefresh = document.getElementById('setting-rules-refresh').value;
-
-    if (ws && ws.readyState === WebSocket.OPEN) {
-        ws.send(JSON.stringify({
-            type: 'update_settings',
-            data: {
-                username: newUsername || 'user',
-                font: newFont,
-                max_agent_hops: parseInt(newHops) || 100,
-                history_limit: newHistory,
-                contrast: newContrast,
-                rules_refresh_interval: parseInt(newRulesRefresh) || 0,
-            }
-        }));
-    }
-}
-
-function setupSettingsKeys() {
-    // Auto-save on blur/Enter for text/number fields
-    for (const id of ['setting-username', 'setting-hops']) {
-        const el = document.getElementById(id);
-        el.addEventListener('blur', () => saveSettings());
-        el.addEventListener('keydown', (e) => {
-            if (e.key === 'Enter') {
-                e.preventDefault();
-                el.blur();
-            }
-            if (e.key === 'Escape') {
-                toggleSettings();
-            }
-        });
-    }
-
-    // Auto-save on change for selects, escape to close
-    for (const id of ['setting-font', 'setting-history', 'setting-contrast', 'setting-rules-refresh']) {
-        const el = document.getElementById(id);
-        el.addEventListener('change', () => {
-            // Apply contrast immediately (don't wait for server round-trip)
-            if (id === 'setting-contrast') {
-                document.body.classList.toggle('high-contrast', el.value === 'high');
-            }
-            saveSettings();
-        });
-        el.addEventListener('keydown', (e) => {
-            if (e.key === 'Escape') {
-                toggleSettings();
-            }
-        });
-    }
 }
 
 // --- Toast notifications ---
