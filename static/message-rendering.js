@@ -138,14 +138,16 @@
     }
 
     function incrementUnreadCount() {
+        // Keep this guard loud if appendMessage ever runs before chat.js installs bridges.
         if (!('unreadCount' in window)) {
             reportMissingBridge('window.unreadCount');
             return;
         }
-        window.unreadCount = (Number(window.unreadCount) || 0) + 1;
+        window.unreadCount = window.unreadCount + 1;
     }
 
     function setLastMentionedAgent(agent) {
+        // Keep this guard loud if appendMessage ever runs before chat.js installs bridges.
         if ('_lastMentionedAgent' in window) {
             window._lastMentionedAgent = agent;
         } else {

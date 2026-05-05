@@ -51,9 +51,9 @@ Object.defineProperty(window, 'ws', { get() { return ws; } });
 Object.defineProperty(window, 'soundEnabled', { get() { return soundEnabled; } });
 Object.defineProperty(window, 'rules', { get() { return rules; }, set(v) { rules = v; } });
 Object.defineProperty(window, 'autoScroll', { get() { return autoScroll; } });
-Object.defineProperty(window, 'unreadCount', { get() { return unreadCount; }, set(v) { unreadCount = Number(v) || 0; } });
+Object.defineProperty(window, 'unreadCount', { get() { return unreadCount; }, set(v) { unreadCount = v; } });
 Object.defineProperty(window, 'activeMentions', { get() { return activeMentions; } });
-Object.defineProperty(window, 'agentHats', { get() { return agentHats; }, set(v) { agentHats = v || {}; } });
+Object.defineProperty(window, 'agentHats', { get() { return agentHats; } });
 Object.defineProperty(window, '_lastMentionedAgent', {
     get() { return _lastMentionedAgent; },
     set(v) { _lastMentionedAgent = v; },
