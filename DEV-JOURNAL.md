@@ -193,3 +193,80 @@ only the currently loaded browser slice.
 3. Decide whether old-result navigation needs a message-window loader before
    considering Phase 6 fully polished.
 4. Continue Phase 5 extraction in smaller frontend-only follow-up branches.
+
+---
+
+## 2026-05-05 19:38 EDT - Phase 5 Frontend Maintainability Closeout
+
+**Branch:** `main`
+**Base Commit:** `33b7dcd`
+**Commits:** `6b2e346`, `7514a42`, `a30186b`, `5feb9d6`, `01696ff`, `51764d3`, `edab142`, `3da9642`, `012a2ba`
+
+### Summary
+
+Finished the planned Phase 5 frontend maintainability pass after Phase 6 had
+already landed. The main outcome is that the largest `static/chat.js` feature
+areas listed in `PROJECT_PLAN.md` now live in focused frontend modules, with
+the remaining bridge surface made more observable where extraction introduced
+new module boundaries.
+
+### Decisions
+
+- Keep `Hub`, `Store`, and `window.*` bridges as transition helpers rather
+  than introducing a bundler or framework during this pass.
+- Extract one behavior slice per branch and merge only after syntax checks,
+  whitespace checks, and pytest passed.
+- Preserve existing globals required by static HTML or already-rendered markup
+  while shrinking new public surface where possible.
+- Treat inline-handler hardening as part of Phase 5 closeout once the image
+  modal and message/session renderer reviews surfaced the same escaping
+  pattern.
+- Keep the confused-agent local stack preserved on safety branches instead of
+  deleting or wholesale-merging it.
+
+### Changes
+
+- Extracted settings into `static/settings.js`.
+- Extracted pins and todos into `static/pins-todos.js`.
+- Extracted schedules into `static/schedules.js`.
+- Extracted attachments, composer image upload, previews, and shared image
+  modal logic into `static/attachments.js`.
+- Extracted help tour behavior into `static/help-tour.js` and reduced exposed
+  help-tour internals before merge.
+- Extracted timeline message rendering and per-channel date-divider state into
+  `static/message-rendering.js`.
+- Hardened image modal attachment handlers by replacing URL-bearing inline
+  handlers with `data-image-modal-url` plus delegated click handling.
+- Added canonical `window.escapeAttr` and moved message-rendering actions from
+  inline handlers to delegated `data-message-action` handling.
+- Moved generated session actions from inline handlers to delegated
+  `data-session-action` handling with observable missing-attribute diagnostics.
+
+### Verification
+
+- Repeated `node --check` across `static/*.js` for each frontend PR.
+- Ran `git diff --check` and `git diff --cached --check` before commits.
+- Ran `.venv/bin/python -m pytest`; latest PR validations passed `66` tests.
+- Used targeted `rg` checks to confirm the hardened image modal,
+  message-rendering, and sessions paths no longer emit the reviewed inline
+  handlers.
+- Verified PR #13 merged cleanly and closed issue #11.
+
+### Open Questions
+
+- Static frontend behavior still has no dedicated JS test harness; these
+  refactors rely on syntax checks, backend tests, targeted greps, review, and
+  manual browser smoke testing.
+- Old search-result navigation from Phase 6 still depends on the message being
+  present in the current browser DOM; a future message-window endpoint could
+  make that more robust.
+- Two parked branches remain as safety refs for local-only confused-agent work:
+  `feature/phase-5-stacked-extractions` and
+  `safety/phase-5-stacked-20260505-034120`.
+
+### Next Steps
+
+1. Browser-smoke test message actions, session launcher flows, and image modal
+   previews against realistic data.
+2. Start Phase 7 Docker Option from a fresh branch on clean `main`.
+3. Keep Docker optional and avoid disturbing the normal host/tmux workflow.
