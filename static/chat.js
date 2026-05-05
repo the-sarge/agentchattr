@@ -452,9 +452,17 @@ function connectWebSocket() {
             agentHats = event.data || {};
             updateAllHats();
         } else if (event.type === 'schedules') {
-            window.Schedules?.setSchedules(event.data || []);
+            if (window.Schedules && typeof window.Schedules.setSchedules === 'function') {
+                window.Schedules.setSchedules(event.data || []);
+            } else {
+                console.error('Schedules module unavailable for schedules event');
+            }
         } else if (event.type === 'schedule') {
-            window.Schedules?.handleScheduleEvent(event.action, event.data);
+            if (window.Schedules && typeof window.Schedules.handleScheduleEvent === 'function') {
+                window.Schedules.handleScheduleEvent(event.action, event.data);
+            } else {
+                console.error('Schedules module unavailable for schedule event');
+            }
         } else if (event.type === 'pending_instance') {
             // A new 2nd+ instance registered — queue naming lightbox
             _pendingNameQueue.push({
@@ -885,6 +893,7 @@ function repositionScrollAnchor() {
         anchor.style.left = (rect.left + rect.width / 2) + 'px';
     }
 }
+window.repositionScrollAnchor = repositionScrollAnchor;
 
 // --- Agents ---
 
@@ -1878,6 +1887,7 @@ function showSlashHint(text) {
         input.classList.remove('slash-hint-active');
     }, 3000);
 }
+window.showSlashHint = showSlashHint;
 
 const SLASH_COMMANDS = [
     { cmd: '/roastreview', desc: 'Get all agents to review and roast each other\'s work', broadcast: true },
@@ -2137,6 +2147,7 @@ function updateSendButton() {
     const hasContent = input.value.trim().length > 0 || pendingAttachments.length > 0;
     group.classList.toggle('inactive', !hasContent);
 }
+window.updateSendButton = updateSendButton;
 
 function sendMessage() {
     const input = document.getElementById('input');
@@ -2668,7 +2679,11 @@ function buildMentionToggles() {
                 activeMentions.add(name);
                 btn.classList.add('active');
             }
-            window.updateSchedulePopoverState?.();
+            if (typeof window.updateSchedulePopoverState === 'function') {
+                window.updateSchedulePopoverState();
+            } else {
+                console.error('Schedules module unavailable for mention toggle update');
+            }
         };
         container.appendChild(btn);
     }

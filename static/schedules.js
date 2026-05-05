@@ -6,30 +6,41 @@
 
     let schedulesList = [];
 
+    function reportMissingBridge(name) {
+        console.error(`Schedules: ${name} bridge not registered`);
+    }
+
     function getSessionToken() {
         return window.SESSION_TOKEN || window.__SESSION_TOKEN__ || '';
     }
 
     function getActiveMentions() {
         const mentions = window.activeMentions;
+        if (!mentions) reportMissingBridge('window.activeMentions');
         return mentions && typeof mentions[Symbol.iterator] === 'function' ? mentions : [];
     }
 
     function repositionScrollAnchor() {
         if (typeof window.repositionScrollAnchor === 'function') {
             window.repositionScrollAnchor();
+        } else {
+            reportMissingBridge('window.repositionScrollAnchor');
         }
     }
 
     function updateSendButton() {
         if (typeof window.updateSendButton === 'function') {
             window.updateSendButton();
+        } else {
+            reportMissingBridge('window.updateSendButton');
         }
     }
 
     function showSlashHint(text) {
         if (typeof window.showSlashHint === 'function') {
             window.showSlashHint(text);
+        } else {
+            reportMissingBridge('window.showSlashHint');
         }
     }
 
