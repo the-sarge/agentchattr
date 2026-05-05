@@ -39,6 +39,13 @@ function sessionActionAttrs(action, attrs = {}) {
     return parts.join(' ');
 }
 
+function sessionDataFor(actionEl, attr, action) {
+    const value = actionEl.dataset[attr];
+    if (value) return value;
+    console.error(`Sessions: missing ${attr} for ${action}`, actionEl);
+    return null;
+}
+
 function handleSessionActionClick(event) {
     const target = event.target instanceof Element ? event.target : null;
     if (!target) return;
@@ -49,37 +56,51 @@ function handleSessionActionClick(event) {
     if (!action) return;
     if (actionEl instanceof HTMLButtonElement) event.preventDefault();
 
-    const templateId = actionEl.dataset.templateId;
-    const msgId = actionEl.dataset.messageId;
-    const draftId = actionEl.dataset.draftId;
-    const proposedBy = actionEl.dataset.proposedBy;
-
     if (action === 'scroll-output') {
+        const msgId = sessionDataFor(actionEl, 'messageId', action);
         if (msgId) scrollToSessionOutput(msgId);
     } else if (action === 'request-draft-changes') {
+        const draftId = sessionDataFor(actionEl, 'draftId', action);
+        const proposedBy = sessionDataFor(actionEl, 'proposedBy', action);
+        const msgId = sessionDataFor(actionEl, 'messageId', action);
         if (draftId && proposedBy && msgId) requestDraftChanges(draftId, proposedBy, msgId);
     } else if (action === 'dismiss-draft') {
+        const msgId = sessionDataFor(actionEl, 'messageId', action);
         if (msgId) dismissDraft(msgId);
     } else if (action === 'run-draft') {
+        const msgId = sessionDataFor(actionEl, 'messageId', action);
         if (msgId) runDraft(msgId);
     } else if (action === 'save-draft') {
+        const msgId = sessionDataFor(actionEl, 'messageId', action);
         if (msgId) saveDraft(msgId, actionEl);
     } else if (action === 'show-cast-preview') {
+        const templateId = sessionDataFor(actionEl, 'templateId', action);
         if (templateId) showCastPreview(templateId);
     } else if (action === 'toggle-template-delete') {
         event.stopPropagation();
+        const templateId = sessionDataFor(actionEl, 'templateId', action);
         if (templateId) toggleDeleteSessionTemplateConfirm(actionEl, templateId, event);
     } else if (action === 'send-design-request') {
         sendDesignRequest();
     } else if (action === 'close-modal') {
-        actionEl.closest('.session-launcher-overlay')?.remove();
+        const modal = actionEl.closest('.session-launcher-overlay');
+        if (modal) {
+            modal.remove();
+        } else {
+            console.error('Sessions: close-modal action outside launcher overlay', actionEl);
+        }
     } else if (action === 'cast-back') {
         sessionCastBack();
     } else if (action === 'launch-session') {
+        const templateId = sessionDataFor(actionEl, 'templateId', action);
         if (templateId) launchSessionWithCast(templateId);
     } else if (action === 'launch-draft-session') {
+        const msgId = sessionDataFor(actionEl, 'messageId', action);
         if (msgId) launchDraftSession(msgId);
     } else if (action === 'submit-draft-changes') {
+        const draftId = sessionDataFor(actionEl, 'draftId', action);
+        const proposedBy = sessionDataFor(actionEl, 'proposedBy', action);
+        const msgId = sessionDataFor(actionEl, 'messageId', action);
         if (draftId && proposedBy && msgId) submitDraftChanges(draftId, proposedBy, msgId);
     } else if (action === 'dismiss-draft-changes') {
         dismissDraftChanges(actionEl);
