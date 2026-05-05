@@ -16,8 +16,6 @@ let rules = [];  // array of rule objects from server
 let activeMentions = new Set();  // agent names with pre-@ toggled on
 let replyingTo = null;  // { id, sender, text } or null
 let unreadCount = 0;    // messages received while scrolled up
-let lastMessageDate = null;  // track date for dividers (general channel)
-let lastMessageDates = {};  // { channel: dateString } for per-channel dividers
 let soundEnabled = false;  // suppress sounds during initial history load
 let activeChannel = localStorage.getItem('agentchattr-channel') || 'general';
 let channelList = ['general'];
@@ -29,6 +27,8 @@ let attachmentsModuleMissingNotified = false;
 let attachmentsModuleMissingContexts = new Set();
 let helpTourModuleMissingNotified = false;
 let helpTourModuleMissingContexts = new Set();
+let messageRenderingModuleMissingNotified = false;
+let messageRenderingModuleMissingContexts = new Set();
 let schedulesModuleMissingNotified = false;
 
 // Expose globals that extracted modules (sessions.js, jobs.js) read via window.*
@@ -51,7 +51,9 @@ Object.defineProperty(window, 'ws', { get() { return ws; } });
 Object.defineProperty(window, 'soundEnabled', { get() { return soundEnabled; } });
 Object.defineProperty(window, 'rules', { get() { return rules; }, set(v) { rules = v; } });
 Object.defineProperty(window, 'autoScroll', { get() { return autoScroll; } });
+Object.defineProperty(window, 'unreadCount', { get() { return unreadCount; }, set(v) { unreadCount = v; } });
 Object.defineProperty(window, 'activeMentions', { get() { return activeMentions; } });
+Object.defineProperty(window, 'agentHats', { get() { return agentHats; } });
 Object.defineProperty(window, '_lastMentionedAgent', {
     get() { return _lastMentionedAgent; },
     set(v) { _lastMentionedAgent = v; },
@@ -158,6 +160,29 @@ function getHelpTourMethod(name, context) {
     return window.HelpTour[name];
 }
 
+function reportMessageRenderingModuleUnavailable(context) {
+    if (!messageRenderingModuleMissingContexts.has(context)) {
+        messageRenderingModuleMissingContexts.add(context);
+        console.error(`Message rendering module unavailable for ${context}`);
+    }
+    if (!messageRenderingModuleMissingNotified) {
+        messageRenderingModuleMissingNotified = true;
+        showSlashHint('Message rendering module failed to load - refresh required');
+    }
+}
+
+function getMessageRenderingMethod(name, context) {
+    if (!window.MessageRendering) {
+        reportMessageRenderingModuleUnavailable(context);
+        return null;
+    }
+    if (typeof window.MessageRendering[name] !== 'function') {
+        reportMessageRenderingModuleUnavailable(`${context}: ${name} missing`);
+        return null;
+    }
+    return window.MessageRendering[name];
+}
+
 function installHelpTourFallbacks() {
     if (typeof window.toggleHelp === 'function') return;
     window.toggleHelp = function() {
@@ -199,6 +224,7 @@ function getAvatarSvg(sender) {
     if (BRAND_AVATARS[base]) return BRAND_AVATARS[base];
     return USER_AVATAR;
 }
+window.getAvatarSvg = getAvatarSvg;
 
 // --- Update check ---
 
@@ -305,6 +331,7 @@ function renderMarkdown(text) {
     html = linkifyPaths(html);
     return html;
 }
+window.renderMarkdown = renderMarkdown;
 
 function linkifyUrls(html) {
     // Match http/https URLs not already inside an <a> tag.
@@ -377,6 +404,7 @@ function addCodeCopyButtons(container) {
         pre.appendChild(btn);
     }
 }
+window.addCodeCopyButtons = addCodeCopyButtons;
 
 // --- WebSocket ---
 
@@ -415,7 +443,8 @@ function connectWebSocket() {
             if (soundEnabled && !document.hasFocus() && event.data.type !== 'join' && event.data.type !== 'leave' && event.data.type !== 'summary' && event.data.sender && !isSelfSender(event.data.sender)) {
                 window.playNotificationSound(event.data.sender);
             }
-            appendMessage(event.data);
+            const appendMessage = getMessageRenderingMethod('appendMessage', 'message event');
+            if (appendMessage) appendMessage(event.data);
         } else if (event.type === 'agent_renamed') {
             // Migrate active mentions before the agents config rebuild
             if (activeMentions.has(event.old_name)) {
@@ -548,10 +577,8 @@ function connectWebSocket() {
                 }
             }
             // Update per-channel date tracking
-            if (lastMessageDates[event.old_name]) {
-                lastMessageDates[event.new_name] = lastMessageDates[event.old_name];
-                delete lastMessageDates[event.old_name];
-            }
+            const renameChannelDateState = getMessageRenderingMethod('renameChannelDateState', 'channel rename date state');
+            if (renameChannelDateState) renameChannelDateState(event.old_name, event.new_name);
             // Update active channel if we were on the renamed one
             if (activeChannel === event.old_name) {
                 activeChannel = event.new_name;
@@ -570,7 +597,8 @@ function connectWebSocket() {
                     el.remove();
                     // Temporarily hijack container to insert at the right spot
                     const container = document.getElementById('messages');
-                    appendMessage(updatedMsg);
+                    const appendMessage = getMessageRenderingMethod('appendMessage', 'edited message render');
+                    if (appendMessage) appendMessage(updatedMsg);
                     // Move the newly appended message to where the old one was
                     const newEl = container.lastElementChild;
                     if (newEl && newEl.dataset.id == updatedMsg.id) {
@@ -596,13 +624,14 @@ function connectWebSocket() {
                 }
                 toRemove.forEach(el => el.remove());
                 // Clean up orphaned date dividers and reset tracking
-                delete lastMessageDates[clearChannel];
+                const clearChannelDateState = getMessageRenderingMethod('clearChannelDateState', 'channel clear date state');
+                if (clearChannelDateState) clearChannelDateState(clearChannel);
                 filterMessagesByChannel();
             } else {
                 // Full clear (all channels)
                 document.getElementById('messages').innerHTML = '';
-                lastMessageDate = null;
-                lastMessageDates = {};
+                const resetDateState = getMessageRenderingMethod('resetDateState', 'full clear date state');
+                if (resetDateState) resetDateState();
             }
             requestAnimationFrame(() => {
                 const _clearDbgAfter = _clearDbgList ? _clearDbgList.children.length : -1;
@@ -635,239 +664,7 @@ function connectWebSocket() {
     };
 }
 
-// --- Date dividers ---
-
-function getMessageDate(msg) {
-    // msg.time is "HH:MM:SS" — we also need the date
-    // Use msg.timestamp (epoch) if available, otherwise try to infer from today
-    if (msg.timestamp) {
-        return new Date(msg.timestamp * 1000).toDateString();
-    }
-    // Fallback: assume today (messages from history might not have timestamps)
-    return new Date().toDateString();
-}
-
-function formatDateDivider(dateStr) {
-    const date = new Date(dateStr);
-    const today = new Date();
-    const yesterday = new Date(today);
-    yesterday.setDate(yesterday.getDate() - 1);
-
-    if (date.toDateString() === today.toDateString()) return 'Today';
-    if (date.toDateString() === yesterday.toDateString()) return 'Yesterday';
-
-    return date.toLocaleDateString('en-GB', {
-        weekday: 'long', day: 'numeric', month: 'long', year: 'numeric'
-    });
-}
-
-function maybeInsertDateDivider(container, msg) {
-    const msgDate = getMessageDate(msg);
-    const channel = msg.channel || 'general';
-    const lastDate = lastMessageDates[channel];
-    
-    if (msgDate !== lastDate) {
-        lastMessageDates[channel] = msgDate;
-        const divider = document.createElement('div');
-        divider.className = 'date-divider';
-        divider.dataset.channel = channel;
-        divider.innerHTML = `<span>${formatDateDivider(msgDate)}</span>`;
-        if (channel !== activeChannel) {
-            divider.style.display = 'none';
-        }
-        container.appendChild(divider);
-    }
-}
-
-// --- Messages ---
-
-function appendMessage(msg) {
-    const container = document.getElementById('messages');
-
-    // Insert date divider if needed
-    maybeInsertDateDivider(container, msg);
-
-    const el = document.createElement('div');
-    el.className = 'message';
-    el.dataset.id = msg.id;
-    const msgChannel = msg.channel || 'general';
-    el.dataset.channel = msgChannel;
-
-    if (msg.type === 'join' || msg.type === 'leave') {
-        el.classList.add('join-msg');
-        const color = getColor(msg.sender);
-        el.innerHTML = `<span class="join-dot" style="background: ${color}"></span><span class="join-text"><strong style="color: ${color}">${escapeHtml(msg.sender)}</strong> ${msg.type === 'join' ? 'joined' : 'left'}</span>`;
-    } else if (msg.type === 'summary') {
-        el.classList.add('summary-msg');
-        const color = getColor(msg.sender);
-        el.innerHTML = `<div class="summary-card"><span class="summary-pill">Summary</span><span class="summary-author" style="color: ${color}">${escapeHtml(msg.sender)}</span><div class="summary-text">${escapeHtml(msg.text)}</div></div>`;
-    } else if (msg.type === 'job_proposal') {
-        el.classList.add('proposal-msg');
-        const meta = msg.metadata || {};
-        const title = escapeHtml(meta.title || '');
-        const body = meta.body ? renderMarkdown(meta.body) : '';
-        const color = getColor(msg.sender);
-        const status = meta.status || 'pending';
-        const isPending = status === 'pending';
-        el.dataset.proposalTitle = meta.title || '';
-        el.dataset.proposalBody = meta.body || '';
-        el.dataset.proposalSender = msg.sender || '';
-        el.innerHTML = `
-            <div class="proposal-card ${isPending ? '' : 'proposal-resolved'}">
-                <div class="proposal-header">
-                    <span class="proposal-pill">Job Proposal</span>
-                    <span class="proposal-author" style="color: ${color}">${escapeHtml(msg.sender)}</span>
-                </div>
-                <div class="proposal-title">${title}</div>
-                ${body ? `<div class="proposal-body">${body}</div>` : ''}
-                ${isPending ? `
-                    <div class="proposal-actions">
-                        <button class="proposal-accept" onclick="acceptProposal(${msg.id})">Accept</button>
-                        <button class="proposal-request-changes" onclick="requestChangesProposal(${msg.id})">Request Changes</button>
-                        <button class="proposal-dismiss" onclick="dismissProposal(${msg.id})">Dismiss</button>
-                    </div>
-                ` : `
-                    <div class="proposal-status-resolved">${status === 'accepted' ? 'Accepted' : 'Dismissed'}</div>
-                `}
-            </div>
-            ${!isPending ? `<div class="msg-actions"><button class="reply-btn" onclick="startReply(${msg.id}, event)">reply</button><button class="delete-btn" onclick="deleteClick(${msg.id}, event)" title="Delete">del</button></div>` : ''}`;
-    } else if (msg.type === 'rule_proposal') {
-        el.classList.add('proposal-msg');
-        const meta = msg.metadata || {};
-        const ruleText = escapeHtml(meta.text || msg.text || '');
-        const color = getColor(msg.sender);
-        const status = meta.status || 'pending';
-        const isPending = status === 'pending';
-        el.innerHTML = `
-            <div class="proposal-card rule-proposal-card ${isPending ? '' : 'proposal-resolved'}">
-                <div class="proposal-header">
-                    <span class="proposal-pill rule-proposal-pill">Rule Proposal</span>
-                    <span class="proposal-author" style="color: ${color}">${escapeHtml(msg.sender)}</span>
-                </div>
-                <div class="rule-proposal-text">${ruleText}</div>
-                ${isPending ? `
-                    <div class="proposal-actions">
-                        <button class="proposal-accept" onclick="resolveRuleProposal(${msg.id}, 'activate')">Activate</button>
-                        <button class="proposal-request-changes" onclick="resolveRuleProposal(${msg.id}, 'draft')">Add to drafts</button>
-                        <button class="proposal-dismiss" onclick="dismissRuleProposal(${msg.id})">Dismiss</button>
-                    </div>
-                ` : `
-                    <div class="proposal-status-resolved">${status === 'activated' ? 'Activated' : status === 'drafted' ? 'Added to drafts' : 'Dismissed'}</div>
-                `}
-            </div>
-            ${!isPending ? `<div class="msg-actions"><button class="reply-btn" onclick="startReply(${msg.id}, event)">reply</button><button class="delete-btn" onclick="deleteClick(${msg.id}, event)" title="Delete">del</button></div>` : ''}`;
-    } else if (window._messageRenderers && window._messageRenderers[msg.type]) {
-        window._messageRenderers[msg.type](el, msg);
-    } else if (msg.type === 'system' || msg.sender === 'system') {
-        el.classList.add('system-msg');
-        el.innerHTML = `<span class="msg-text">${escapeHtml(msg.text)}</span>`;
-    } else {
-        const isError = msg.text.startsWith('[') && msg.text.includes('error');
-        if (isError) el.classList.add('error-msg');
-
-        // Update last mentioned agent if message is from user (Ben)
-        if (isSelfSender(msg.sender)) {
-            const mentions = msg.text.match(/@(\w[\w-]*)/g);
-            if (mentions) {
-                const lastMention = mentions[mentions.length - 1].slice(1).toLowerCase();
-                // Check against registered agents (agentConfig keys are name labels)
-                if (agentConfig[lastMention]) {
-                    _lastMentionedAgent = lastMention;
-                }
-            }
-        }
-
-        let textHtml = styleHashtags(renderMarkdown(msg.text));
-
-        const senderColor = getColor(msg.sender);
-        const isSelf = isSelfSender(msg.sender);
-        el.classList.add(isSelf ? 'self' : 'other');
-
-        let attachmentsHtml = '';
-        if (msg.attachments && msg.attachments.length > 0) {
-            attachmentsHtml = '<div class="msg-attachments">';
-            for (const att of msg.attachments) {
-                attachmentsHtml += `<img src="${escapeHtml(att.url)}" alt="${escapeHtml(att.name)}" onclick="openImageModal('${escapeHtml(att.url)}')">`;
-            }
-            attachmentsHtml += '</div>';
-        }
-
-        const todoStatus = todos[msg.id] || null;
-
-        // Reply quote (if this message is a reply)
-        let replyHtml = '';
-        if (msg.reply_to !== undefined && msg.reply_to !== null) {
-            const parentEl = document.querySelector(`.message[data-id="${msg.reply_to}"]`);
-            if (parentEl) {
-                const parentSender = parentEl.querySelector('.msg-sender')?.textContent || '?';
-                const parentText = parentEl.dataset.rawText || parentEl.querySelector('.msg-text')?.textContent || '';
-                const truncated = parentText.length > 80 ? parentText.slice(0, 80) + '...' : parentText;
-                const parentColor = parentEl.querySelector('.msg-sender')?.style.color || 'var(--text-dim)';
-                replyHtml = `<div class="reply-quote" onclick="scrollToMessage(${msg.reply_to})"><span class="reply-sender" style="color: ${parentColor}">${escapeHtml(parentSender)}</span> ${escapeHtml(truncated)}</div>`;
-            }
-        }
-
-        const agentKey = (resolveAgent(msg.sender.toLowerCase()) || msg.sender).toLowerCase();
-        const hatSvg = agentHats[agentKey] || '';
-        const hatHtml = hatSvg ? `<div class="hat-overlay" data-agent="${escapeHtml(agentKey)}">${hatSvg}</div>` : '';
-        const avatarHtml = `<div class="avatar-wrap" data-agent="${escapeHtml(agentKey)}"><div class="avatar" style="background-color: ${senderColor}">${getAvatarSvg(msg.sender)}</div>${hatHtml}</div>`;
-
-        const statusLabel = todoStatusLabel(todoStatus);
-        el.dataset.rawText = msg.text;
-        const senderRole = _agentRoles[msg.sender] || '';
-        const roleClass = senderRole ? 'bubble-role has-role' : 'bubble-role';
-        const rolePillHtml = !isSelf ? `<button class="${roleClass}" onclick="showBubbleRolePicker(this, '${escapeHtml(msg.sender)}')" title="${senderRole ? escapeHtml(senderRole) : 'Set role'}">${senderRole || 'choose a role'}</button>` : '';
-        // Inline decision choices (if present)
-        let choicesHtml = '';
-        const meta = msg.metadata || {};
-        const choicesList = meta.choices || [];
-        if (msg.type === 'decision' && choicesList.length > 0) {
-            if (meta.resolved) {
-                choicesHtml = `<div class="decision-choices"><div class="decision-resolved">You chose: <strong>${escapeHtml(meta.chosen || '')}</strong></div></div>`;
-            } else {
-                choicesHtml = '<div class="decision-choices">' + choicesList.map(c =>
-                    `<button class="decision-choice" onclick="resolveDecision(${msg.id}, '${escapeHtml(c).replace(/'/g, "\\'")}')">${escapeHtml(c)}</button>`
-                ).join('') + '</div>';
-            }
-        }
-        el.innerHTML = `<div class="todo-strip"></div>${isSelf ? '' : avatarHtml}<div class="chat-bubble" style="--bubble-color: ${senderColor}">${replyHtml}<div class="bubble-header"><span class="msg-sender" style="color: ${senderColor}">${escapeHtml(msg.sender)}</span>${rolePillHtml}<span class="msg-time">${msg.time || ''}</span></div><div class="msg-text">${textHtml}</div>${choicesHtml}${attachmentsHtml}<button class="convert-job-pill" onclick="startJobFromMessage(${msg.id}); event.stopPropagation();" title="Convert to job">convert to job</button><button class="bubble-copy" onclick="copyMessage(${msg.id}, event)" title="Copy message"><svg width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><rect x="9" y="9" width="13" height="13" rx="2"/><path d="M5 15H4a2 2 0 0 1-2-2V4a2 2 0 0 1 2-2h9a2 2 0 0 1 2 2v1"/></svg></button></div><div class="msg-actions"><button class="reply-btn" onclick="startReply(${msg.id}, event)">reply</button><button class="todo-hint" onclick="todoCycle(${msg.id}); event.stopPropagation();">${statusLabel}</button><button class="delete-btn" onclick="deleteClick(${msg.id}, event)" title="Delete">del</button></div>`;
-        if (todoStatus) el.classList.add('msg-todo', `msg-todo-${todoStatus}`);
-        if (msg.metadata?.session_output) el.classList.add('session-output');
-
-        // Add copy buttons to code blocks
-        addCodeCopyButtons(el);
-    }
-
-    // Hide messages from other channels
-    if (msgChannel !== activeChannel) {
-        el.style.display = 'none';
-        // Track unread for background channels (skip joins/leaves and initial history load)
-        if (soundEnabled && msg.type !== 'join' && msg.type !== 'leave') {
-            channelUnread[msgChannel] = (channelUnread[msgChannel] || 0) + 1;
-            renderChannelTabs();
-            // Play soft pluck for cross-channel chat messages from others (only when focused)
-            if (document.hasFocus() && msg.type === 'chat' && msg.sender && !isSelfSender(msg.sender)) {
-                window.playCrossChannelSound();
-            }
-        }
-    }
-
-    container.appendChild(el);
-
-    // Collapse consecutive job_created messages into a group
-    if (msg.type === 'job_created' && window._collapseJobBreadcrumbs) {
-        window._collapseJobBreadcrumbs(container, el);
-    }
-
-    if (msgChannel !== activeChannel) return;  // don't scroll for hidden messages
-
-    if (autoScroll) {
-        scrollToBottom();
-    } else {
-        unreadCount++;
-        updateScrollAnchor();
-    }
-}
+// Timeline message rendering and date dividers live in message-rendering.js.
 
 function getSenderClass(sender) {
     const s = sender.toLowerCase();
@@ -888,6 +685,7 @@ function resolveAgent(name) {
     }
     return null;
 }
+window.resolveAgent = resolveAgent;
 
 function getColor(sender) {
     const s = sender.toLowerCase();
@@ -905,6 +703,7 @@ function getColor(sender) {
     if (base in baseColors) return baseColors[base].color;
     return 'var(--user-color)';
 }
+window.getColor = getColor;
 
 function colorMentions(textHtml) {
     // Match any @word — we'll resolve color per match
@@ -930,7 +729,6 @@ function scrollToBottom() {
     updateScrollAnchor();
 }
 window.scrollToBottom = scrollToBottom;
-window.appendMessage = appendMessage;
 
 function updateScrollAnchor() {
     const anchor = document.getElementById('scroll-anchor');
@@ -946,6 +744,7 @@ function updateScrollAnchor() {
     }
     repositionScrollAnchor();
 }
+window.updateScrollAnchor = updateScrollAnchor;
 
 function repositionScrollAnchor() {
     const anchor = document.getElementById('scroll-anchor');
@@ -1691,6 +1490,9 @@ function _deleteCustomRole(role) {
 // --- Status ---
 
 const _agentRoles = {};  // name → role string
+window.getAgentRole = function(agentName) {
+    return _agentRoles[agentName] || '';
+};
 
 function fetchRoles() {
     fetch('/api/roles').then(r => r.json()).then(roles => {
@@ -2838,6 +2640,7 @@ function styleHashtags(html) {
             return `${prefix}<span class="msg-hashtag">#${tag}</span>`;
         });
 }
+window.styleHashtags = styleHashtags;
 
 // --- Helpers ---
 
