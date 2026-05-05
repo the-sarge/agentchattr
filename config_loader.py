@@ -16,7 +16,8 @@ isolated instances per project without editing the repo's config file.
 
 Relative paths in env var overrides resolve against the current working
 directory (where the user invoked the command from), not agentchattr's
-install directory.
+install directory. Relative AGENTCHATTR_PROJECT_CONFIG paths resolve against
+agentchattr's install directory so server and wrapper launches agree.
 """
 
 import os
@@ -24,6 +25,7 @@ import re
 import sys
 import tomllib
 from pathlib import Path
+from urllib.parse import urlparse
 
 ROOT = Path(__file__).parent
 PROJECT_CONFIG_ENV = "AGENTCHATTR_PROJECT_CONFIG"
@@ -143,7 +145,7 @@ def _merge_project_config(config: dict, project_config: dict) -> None:
 def _resolve_project_config_path(raw: str) -> Path:
     path = Path(raw).expanduser()
     if not path.is_absolute():
-        path = (Path.cwd() / path).resolve()
+        path = (ROOT / path).resolve()
     return path
 
 
@@ -207,6 +209,19 @@ def _validate_color(value, label: str, errors: list[str]) -> None:
         return
     if not isinstance(value, str) or not _HEX_COLOR_RE.match(value):
         errors.append(f"{label} must be a #RRGGBB hex color")
+
+
+def _validate_http_url(value, label: str, errors: list[str]) -> None:
+    if value is None:
+        return
+    if not isinstance(value, str):
+        errors.append(f"{label} must be a string")
+        return
+    if not value.strip():
+        return
+    parsed = urlparse(value)
+    if parsed.scheme not in ("http", "https") or not parsed.netloc:
+        errors.append(f"{label} must be an http(s) URL")
 
 
 def _validate_agent(name: str, cfg, errors: list[str]) -> None:
@@ -299,10 +314,11 @@ def validate_config(
     if require_project and not str(project.get("tmux_prefix", "")).strip():
         errors.append("[project].tmux_prefix is required in team files")
     _validate_color(project.get("accent_color"), "[project].accent_color", errors)
-    for key in ("repo_url", "github_url", "board_url", "github_project_url", "link_label", "link_url"):
-        value = project.get(key)
-        if value is not None and not isinstance(value, str):
-            errors.append(f"[project].{key} must be a string")
+    for key in ("repo_url", "github_url", "board_url", "github_project_url", "link_url"):
+        _validate_http_url(project.get(key), f"[project].{key}", errors)
+    link_label = project.get("link_label")
+    if link_label is not None and not isinstance(link_label, str):
+        errors.append("[project].link_label must be a string")
 
     server = config.get("server", {})
     if not isinstance(server, dict):

@@ -743,6 +743,12 @@ def is_online(name: str) -> bool:
         return name in _presence and now - _presence.get(name, 0) < PRESENCE_TIMEOUT
 
 
+def snapshot_presence() -> tuple[dict[str, float], dict[str, bool]]:
+    """Return copies of presence/activity state for API status payloads."""
+    with _presence_lock:
+        return dict(_presence), dict(_activity)
+
+
 def set_active(name: str, active: bool):
     with _presence_lock:
         _activity[name] = active
@@ -960,4 +966,3 @@ def run_http_server():
 def run_sse_server():
     """Block — run SSE MCP in a background thread."""
     mcp_sse.run(transport="sse")
-

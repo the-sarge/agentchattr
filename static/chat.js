@@ -9,7 +9,7 @@ let pendingAttachments = [];
 let autoScroll = true;
 let reconnectTimer = null;
 let username = 'user';
-let selfNames = new Set(JSON.parse(localStorage.getItem('agentchattr-self-names') || '["user"]').map(n => String(n).toLowerCase()));
+let selfNames = loadSelfNames();
 let agentConfig = {};  // { name: { color, label } } — registered instances (used for pills)
 let baseColors = {};   // { name: { color, label } } — base agent colors (for message coloring)
 let todos = {};  // { msg_id: "todo" | "done" }
@@ -39,6 +39,7 @@ window._setPendingChannelSwitch = function(v) { pendingChannelSwitch = v; };
 // scrollToBottom is set after function definition (see below)
 Object.defineProperty(window, 'username', { get() { return username; } });
 Object.defineProperty(window, 'agentConfig', { get() { return agentConfig; } });
+// Cross-module read bridge for search-nav filters; chat.js remains the owner.
 Object.defineProperty(window, 'todos', { get() { return todos; } });
 Object.defineProperty(window, 'ws', { get() { return ws; } });
 Object.defineProperty(window, 'soundEnabled', { get() { return soundEnabled; } });
@@ -49,19 +50,33 @@ Object.defineProperty(window, '_lastMentionedAgent', {
     set(v) { _lastMentionedAgent = v; },
 });
 
+function loadSelfNames() {
+    try {
+        const raw = JSON.parse(localStorage.getItem('agentchattr-self-names') || '["user"]');
+        if (Array.isArray(raw)) {
+            const names = raw.map(n => String(n || '').trim().toLowerCase()).filter(Boolean);
+            return new Set(names.length ? names : ['user']);
+        }
+    } catch (_err) {}
+    return new Set(['user']);
+}
+
 function rememberSelfName(name) {
     const normalized = String(name || '').trim().toLowerCase();
     if (!normalized) return;
     selfNames.add(normalized);
-    localStorage.setItem('agentchattr-self-names', JSON.stringify([...selfNames]));
+    try {
+        localStorage.setItem('agentchattr-self-names', JSON.stringify([...selfNames]));
+    } catch (_err) {}
 }
 
 function isSelfSender(sender) {
     const normalized = String(sender || '').trim().toLowerCase();
     if (!normalized || normalized === 'system') return false;
     if (selfNames.has(normalized)) return true;
-    if (agentConfig[normalized] || baseColors[normalized] || resolveAgent(normalized)) return false;
-    return true;
+    // Unknown senders are not self; during reconnects they may be agents
+    // before the registry/base-color messages have finished loading.
+    return false;
 }
 window.isSelfSender = isSelfSender;
 

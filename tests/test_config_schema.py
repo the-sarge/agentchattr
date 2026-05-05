@@ -123,6 +123,24 @@ role = "Builder"
         self.assertIn("color", msg)
         self.assertIn("role", msg)
 
+    def test_invalid_project_urls_raise(self):
+        bad = {
+            "project": {
+                "tmux_prefix": "agentchattr-bad-url",
+                "repo_url": "javascript:alert(1)",
+                "board_url": "github.com/orgs/demo/projects/1",
+                "link_url": 123,
+            },
+            "server": {"port": 8300},
+            "agents": {"one": {"provider": "claude"}},
+        }
+        with self.assertRaises(config_loader.ConfigError) as ctx:
+            config_loader.validate_config(bad, source="bad-url.toml", require_project=True)
+        msg = str(ctx.exception)
+        self.assertIn("repo_url", msg)
+        self.assertIn("board_url", msg)
+        self.assertIn("link_url", msg)
+
     def test_duplicate_known_team_ports_and_prefixes_raise(self):
         with tempfile.TemporaryDirectory() as tmp:
             root = Path(tmp)

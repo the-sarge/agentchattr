@@ -28,6 +28,9 @@ max_agent_hops = 100
 cwd = ".."
 args = ["--dangerously-skip-permissions"]
 
+[agent_defaults.codex]
+cwd = ".."
+
 [agents.architect]
 provider = "claude"
 label = "Architect"
@@ -36,7 +39,6 @@ color = "#da7756"
 
 [agents.builder]
 provider = "codex"
-cwd = ".."
 label = "Builder"
 role = "Builder"
 color = "#10a37f"

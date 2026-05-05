@@ -30,6 +30,7 @@ from registry import RuntimeRegistry
 from session_store import SessionStore, validate_session_template
 from session_engine import SessionEngine
 from config_loader import PROJECT_CONFIG_ENV, TMUX_PREFIX_ENV
+import mcp_bridge
 
 log = logging.getLogger(__name__)
 
@@ -977,6 +978,7 @@ def _slug(value: str) -> str:
 def _runtime_path(raw: str) -> str:
     path = Path(str(raw)).expanduser()
     if not path.is_absolute():
+        # Keep this in sync with run.py's ROOT / data_dir resolution.
         path = (Path(__file__).parent / path).resolve()
     return str(path)
 
@@ -1043,8 +1045,6 @@ def _tmux_sessions() -> set[str]:
 
 
 def _agent_ops_payload() -> dict:
-    import mcp_bridge
-
     now = time.time()
     project = _project_payload()
     prefix = project["tmux_prefix"]
@@ -1056,9 +1056,7 @@ def _agent_ops_payload() -> dict:
     for name, info in registered.items():
         registered_by_base.setdefault(info.get("base", name), []).append(name)
 
-    with mcp_bridge._presence_lock:
-        presence = dict(mcp_bridge._presence)
-        activity = dict(mcp_bridge._activity)
+    presence, activity = mcp_bridge.snapshot_presence()
 
     configured = []
     for name, cfg in configured_cfg.items():

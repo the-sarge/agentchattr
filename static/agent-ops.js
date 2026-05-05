@@ -2,6 +2,7 @@
     let agentOpsOpen = false;
     let agentOpsTimer = null;
     let lastProject = null;
+    const AGENT_OPS_REFRESH_MS = 15000;
 
     function authHeaders() {
         const token = window.__SESSION_TOKEN__ || window.SESSION_TOKEN || '';
@@ -272,7 +273,9 @@
         if (agentOpsOpen) {
             refreshAgentOps();
             clearInterval(agentOpsTimer);
-            agentOpsTimer = setInterval(refreshAgentOps, 5000);
+            agentOpsTimer = setInterval(() => {
+                if (document.visibilityState !== 'hidden') refreshAgentOps();
+            }, AGENT_OPS_REFRESH_MS);
         } else {
             clearInterval(agentOpsTimer);
             agentOpsTimer = null;
@@ -281,5 +284,8 @@
 
     document.addEventListener('DOMContentLoaded', () => {
         loadProject();
+    });
+    document.addEventListener('visibilitychange', () => {
+        if (agentOpsOpen && document.visibilityState !== 'hidden') refreshAgentOps();
     });
 })();
