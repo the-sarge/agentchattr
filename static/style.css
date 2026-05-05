@@ -639,9 +639,76 @@ header h1 {
     overflow: hidden;
 }
 
+/* --- Presence sidebar --- */
+
+#presence-sidebar {
+    order: 2;
+    width: 180px;
+    min-width: 150px;
+    max-width: 240px;
+    flex-shrink: 0;
+    border-left: 1px solid var(--border);
+    background: var(--bg-header, #1e1e2e);
+    display: flex;
+    flex-direction: column;
+    overflow: hidden;
+}
+
+body.sidebars-agents-left #presence-sidebar {
+    order: 0;
+    border-left: none;
+    border-right: 1px solid var(--border);
+}
+
+.presence-sidebar-header {
+    padding: 10px 8px 6px 12px;
+    color: var(--text-dim);
+    font-size: 10px;
+    font-weight: 700;
+    letter-spacing: 0.08em;
+    text-transform: uppercase;
+    user-select: none;
+}
+
+#presence-sidebar #agent-status {
+    flex-direction: column;
+    gap: 6px;
+    max-width: none;
+    padding: 0 8px 10px;
+    overflow-x: hidden;
+    overflow-y: auto;
+}
+
+#presence-sidebar .status-pill {
+    width: 100%;
+    border-radius: var(--radius-md);
+    justify-content: flex-start;
+    padding: 6px 8px;
+}
+
+#presence-sidebar .status-label {
+    min-width: 0;
+    overflow: hidden;
+    text-overflow: ellipsis;
+    white-space: nowrap;
+}
+
+body.jobs-panel-open #presence-sidebar,
+body.rules-panel-open #presence-sidebar,
+body.agent-ops-open #presence-sidebar {
+    display: none;
+}
+
+@media (max-width: 900px) {
+    #presence-sidebar {
+        display: none;
+    }
+}
+
 /* --- Timeline --- */
 
 main#timeline {
+    order: 1;
     flex: 1;
     overflow-y: auto;
     overflow-x: hidden;
@@ -830,10 +897,6 @@ main#timeline {
     align-items: baseline;
     gap: 8px;
     margin-bottom: 6px;
-}
-
-.message.self .msg-sender {
-    display: none;
 }
 
 .message:hover .chat-bubble {
@@ -1515,6 +1578,7 @@ main#timeline {
 /* --- Sidebar panels (rules + jobs shared) --- */
 
 #rules-panel {
+    order: 3;
     --panel-w: 320px;
     width: var(--panel-w);
     min-width: 220px;
@@ -1530,6 +1594,11 @@ main#timeline {
     position: relative;
 }
 
+#jobs-panel,
+#agent-ops-panel {
+    order: 3;
+}
+
 #rules-panel.hidden {
     margin-right: calc(-1 * var(--panel-w));
     opacity: 0;
@@ -1539,16 +1608,23 @@ main#timeline {
 /* --- Channel sidebar (Discord/Slack-style) --- */
 
 #channel-sidebar {
+    order: 0;
     position: relative;
-    width: var(--channel-sidebar-w, 200px);
-    min-width: 140px;
-    max-width: 400px;
+    width: var(--channel-sidebar-w, 240px);
+    min-width: 180px;
+    max-width: 480px;
     flex-shrink: 0;
     border-right: 1px solid var(--border);
     background: var(--bg-header, #1e1e2e);
     display: flex;
     flex-direction: column;
     overflow: hidden;
+}
+
+body.sidebars-agents-left #channel-sidebar {
+    order: 2;
+    border-right: none;
+    border-left: 1px solid var(--border);
 }
 
 #channel-sidebar.hidden {
@@ -1609,7 +1685,7 @@ main#timeline {
     background: transparent;
     border: none;
     color: var(--text-dim);
-    font-size: 13px;
+    font-size: 12px;
     font-weight: 600;
     font-family: inherit;
     cursor: pointer;
@@ -1691,6 +1767,11 @@ main#timeline {
     z-index: 10;
     background: transparent;
     transition: background 0.15s;
+}
+
+body.sidebars-agents-left .channel-sidebar-grip {
+    left: 0;
+    right: auto;
 }
 
 .channel-sidebar-grip:hover,

@@ -15,7 +15,7 @@ ROOT = Path(__file__).resolve().parents[1]
 if str(ROOT) not in sys.path:
     sys.path.insert(0, str(ROOT))
 
-from wrapper import _resolve_mcp_inject, _write_json_mcp_settings  # noqa: E402
+from wrapper import _build_provider_launch, _resolve_mcp_inject, _write_json_mcp_settings  # noqa: E402
 
 
 class JsonMcpSettingsTests(unittest.TestCase):
@@ -125,6 +125,30 @@ class ProviderAliasDefaultsTests(unittest.TestCase):
         })
         self.assertEqual(cfg["mcp_inject"], "settings_file")
         self.assertEqual(cfg["mcp_settings_path"], ".custom/settings.json")
+
+    def test_agent_args_are_between_mcp_args_and_user_passthrough(self):
+        launch_args, _env, _inject_env, _path = _build_provider_launch(
+            agent="builder",
+            agent_cfg={
+                "provider": "codex",
+                "mcp_inject": "proxy_flag",
+                "mcp_proxy_flag_template": "--mcp {url}",
+                "args": ["--model", "gpt-5.2"],
+            },
+            instance_name="builder",
+            data_dir=Path(tempfile.gettempdir()),
+            proxy_url="http://127.0.0.1:9999/mcp",
+            extra_args=["--ask-for-approval", "never"],
+            env={},
+        )
+        self.assertEqual(
+            launch_args,
+            [
+                "--mcp", "http://127.0.0.1:9999/mcp",
+                "--model", "gpt-5.2",
+                "--ask-for-approval", "never",
+            ],
+        )
 
 
 if __name__ == "__main__":

@@ -16,16 +16,25 @@ isolated instances per project without editing the repo's config file.
 
 Relative paths in env var overrides resolve against the current working
 directory (where the user invoked the command from), not agentchattr's
-install directory.
+install directory. Relative AGENTCHATTR_PROJECT_CONFIG paths resolve against
+agentchattr's install directory so server and wrapper launches agree.
 """
 
 import os
+import re
 import sys
 import tomllib
 from pathlib import Path
+from urllib.parse import urlparse
 
 ROOT = Path(__file__).parent
 PROJECT_CONFIG_ENV = "AGENTCHATTR_PROJECT_CONFIG"
+TMUX_PREFIX_ENV = "AGENTCHATTR_TMUX_PREFIX"
+MAX_ROLE_LEN = 20
+
+
+class ConfigError(ValueError):
+    """Raised when a config or team file is structurally invalid."""
 
 _PROVIDER_COMMANDS = {
     "claude": "claude",
@@ -37,6 +46,9 @@ _PROVIDER_COMMANDS = {
     "codebuddy": "codebuddy",
     "copilot": "copilot",
 }
+_KNOWN_PROVIDERS = set(_PROVIDER_COMMANDS)
+_HEX_COLOR_RE = re.compile(r"^#[0-9a-fA-F]{6}$")
+_AGENT_NAME_RE = re.compile(r"^[A-Za-z0-9][A-Za-z0-9_-]{0,63}$")
 
 
 # Mapping: env var name → (config section, key, is_int)
@@ -130,17 +142,270 @@ def _merge_project_config(config: dict, project_config: dict) -> None:
             config[section] = value
 
 
+def _resolve_project_config_path(raw: str) -> Path:
+    path = Path(raw).expanduser()
+    if not path.is_absolute():
+        path = (ROOT / path).resolve()
+    return path
+
+
 def _load_project_config(config: dict) -> None:
     raw = os.environ.get(PROJECT_CONFIG_ENV, "").strip()
     if not raw:
         return
 
-    path = Path(raw).expanduser()
-    if not path.is_absolute():
-        path = (Path.cwd() / path).resolve()
+    path = _resolve_project_config_path(raw)
     with open(path, "rb") as f:
         project_config = tomllib.load(f)
+    validate_config(project_config, source=path, require_project=False, check_known_files=False)
     _merge_project_config(config, project_config)
+    config.setdefault("_meta", {})["project_config_path"] = str(path)
+
+
+def _apply_agent_defaults(config: dict) -> None:
+    """Merge [agent_defaults.<provider>] into matching agents."""
+    defaults = config.get("agent_defaults", {})
+    agents = config.get("agents", {})
+    if not isinstance(defaults, dict) or not isinstance(agents, dict):
+        return
+
+    for name, cfg in list(agents.items()):
+        if not isinstance(cfg, dict):
+            continue
+        provider = str(cfg.get("provider", "")).strip().lower()
+        if not provider and str(cfg.get("type", "")).strip().lower() == "api":
+            provider = "api"
+        provider_defaults = defaults.get(provider)
+        if isinstance(provider_defaults, dict):
+            agents[name] = {**provider_defaults, **cfg}
+
+
+def discover_team_files(root: Path | None = None) -> list[Path]:
+    """Return known project/team TOML files under teams/ and projects/."""
+    root = root or ROOT
+    paths: list[Path] = []
+    for dirname in ("teams", "projects"):
+        directory = root / dirname
+        if directory.exists():
+            paths.extend(sorted(directory.glob("*.toml")))
+    return paths
+
+
+def _port_value(section: dict, key: str, label: str, errors: list[str]) -> int | None:
+    value = section.get(key)
+    if value is None:
+        return None
+    if isinstance(value, bool) or not isinstance(value, int):
+        errors.append(f"{label} must be an integer")
+        return None
+    if not (1 <= value <= 65535):
+        errors.append(f"{label} must be between 1 and 65535")
+        return None
+    return value
+
+
+def _validate_color(value, label: str, errors: list[str]) -> None:
+    if value is None:
+        return
+    if not isinstance(value, str) or not _HEX_COLOR_RE.match(value):
+        errors.append(f"{label} must be a #RRGGBB hex color")
+
+
+def _validate_http_url(value, label: str, errors: list[str]) -> None:
+    if value is None:
+        return
+    if not isinstance(value, str):
+        errors.append(f"{label} must be a string")
+        return
+    if not value.strip():
+        return
+    parsed = urlparse(value)
+    if parsed.scheme not in ("http", "https") or not parsed.netloc:
+        errors.append(f"{label} must be an http(s) URL")
+
+
+def _validate_agent(name: str, cfg, errors: list[str]) -> None:
+    if not _AGENT_NAME_RE.match(str(name)):
+        errors.append(f"[agents.{name}] has an invalid handle; use letters, numbers, _ or -")
+    if not isinstance(cfg, dict):
+        errors.append(f"[agents.{name}] must be a table")
+        return
+
+    agent_type = str(cfg.get("type", "")).strip().lower()
+    provider = str(cfg.get("provider", "")).strip().lower()
+    command = cfg.get("command")
+    if agent_type and agent_type != "api":
+        errors.append(f"[agents.{name}].type must be \"api\" when set")
+    if provider and provider not in _KNOWN_PROVIDERS:
+        errors.append(f"[agents.{name}].provider has unknown provider {provider!r}")
+    if command is not None and (not isinstance(command, str) or not command.strip()):
+        errors.append(f"[agents.{name}].command must be a non-empty string")
+    if agent_type != "api" and not provider and command is None:
+        errors.append(f"[agents.{name}] must define provider or command")
+    if agent_type == "api":
+        if not isinstance(cfg.get("base_url"), str) or not cfg.get("base_url", "").strip():
+            errors.append(f"[agents.{name}].base_url is required for API agents")
+
+    _validate_color(cfg.get("color"), f"[agents.{name}].color", errors)
+
+    role = cfg.get("role")
+    if role is not None:
+        if not isinstance(role, str):
+            errors.append(f"[agents.{name}].role must be a string")
+        elif len(role.strip()) > MAX_ROLE_LEN:
+            errors.append(f"[agents.{name}].role must be {MAX_ROLE_LEN} characters or fewer")
+
+    args = cfg.get("args")
+    if args is not None:
+        if not isinstance(args, list) or any(not isinstance(arg, str) for arg in args):
+            errors.append(f"[agents.{name}].args must be a list of strings")
+
+
+def _validate_agent_defaults(config: dict, errors: list[str]) -> None:
+    defaults = config.get("agent_defaults", {})
+    if defaults is None:
+        return
+    if not isinstance(defaults, dict):
+        errors.append("[agent_defaults] must be a table")
+        return
+    for provider, cfg in defaults.items():
+        provider_name = str(provider).strip().lower()
+        if provider_name != "api" and provider_name not in _KNOWN_PROVIDERS:
+            errors.append(f"[agent_defaults.{provider}] has unknown provider")
+        if not isinstance(cfg, dict):
+            errors.append(f"[agent_defaults.{provider}] must be a table")
+            continue
+        command = cfg.get("command")
+        if command is not None and (not isinstance(command, str) or not command.strip()):
+            errors.append(f"[agent_defaults.{provider}].command must be a non-empty string")
+        _validate_color(cfg.get("color"), f"[agent_defaults.{provider}].color", errors)
+        role = cfg.get("role")
+        if role is not None:
+            if not isinstance(role, str):
+                errors.append(f"[agent_defaults.{provider}].role must be a string")
+            elif len(role.strip()) > MAX_ROLE_LEN:
+                errors.append(f"[agent_defaults.{provider}].role must be {MAX_ROLE_LEN} characters or fewer")
+        args = cfg.get("args")
+        if args is not None and (not isinstance(args, list) or any(not isinstance(arg, str) for arg in args)):
+            errors.append(f"[agent_defaults.{provider}].args must be a list of strings")
+
+
+def validate_config(
+    config: dict,
+    *,
+    source: Path | str = "config",
+    require_project: bool = False,
+    check_known_files: bool = False,
+    root: Path | None = None,
+) -> None:
+    """Validate the shared config shape."""
+    errors: list[str] = []
+    label = str(source)
+
+    if not isinstance(config, dict):
+        raise ConfigError(f"{label}: config must be a table")
+
+    project = config.get("project", {})
+    if project is None:
+        project = {}
+    if not isinstance(project, dict):
+        errors.append("[project] must be a table")
+        project = {}
+    if require_project and not str(project.get("tmux_prefix", "")).strip():
+        errors.append("[project].tmux_prefix is required in team files")
+    _validate_color(project.get("accent_color"), "[project].accent_color", errors)
+    for key in ("repo_url", "github_url", "board_url", "github_project_url", "link_url"):
+        _validate_http_url(project.get(key), f"[project].{key}", errors)
+    link_label = project.get("link_label")
+    if link_label is not None and not isinstance(link_label, str):
+        errors.append("[project].link_label must be a string")
+
+    server = config.get("server", {})
+    if not isinstance(server, dict):
+        errors.append("[server] must be a table")
+        server = {}
+    _port_value(server, "port", "[server].port", errors)
+
+    mcp = config.get("mcp", {})
+    if not isinstance(mcp, dict):
+        errors.append("[mcp] must be a table")
+        mcp = {}
+    _port_value(mcp, "http_port", "[mcp].http_port", errors)
+    _port_value(mcp, "sse_port", "[mcp].sse_port", errors)
+
+    agents = config.get("agents", {})
+    if not isinstance(agents, dict) or not agents:
+        errors.append("config must define at least one [agents.<name>] entry")
+    else:
+        for name, cfg in agents.items():
+            _validate_agent(str(name), cfg, errors)
+
+    _validate_agent_defaults(config, errors)
+
+    if errors:
+        joined = "\n  - ".join(errors)
+        raise ConfigError(f"{label} is invalid:\n  - {joined}")
+    if check_known_files:
+        validate_known_team_files(root=root or ROOT)
+
+
+def validate_known_team_files(root: Path | None = None) -> None:
+    """Validate known teams/projects for duplicate tmux prefixes and ports."""
+    root = root or ROOT
+    errors: list[str] = []
+    prefixes: dict[str, Path] = {}
+    ports: dict[int, tuple[Path, str]] = {}
+
+    for path in discover_team_files(root):
+        try:
+            with open(path, "rb") as f:
+                team = tomllib.load(f)
+            validate_config(team, source=path, require_project=True, check_known_files=False, root=root)
+        except (OSError, tomllib.TOMLDecodeError, ConfigError) as exc:
+            errors.append(str(exc))
+            continue
+
+        project = team.get("project", {}) if isinstance(team.get("project", {}), dict) else {}
+        prefix = str(project.get("tmux_prefix", "")).strip()
+        if prefix:
+            if prefix in prefixes:
+                errors.append(f"{path}: duplicate tmux_prefix {prefix!r} also used by {prefixes[prefix]}")
+            else:
+                prefixes[prefix] = path
+
+        for section, key, port in (
+            ("server", "port", team.get("server", {}).get("port") if isinstance(team.get("server"), dict) else None),
+            ("mcp", "http_port", team.get("mcp", {}).get("http_port") if isinstance(team.get("mcp"), dict) else None),
+            ("mcp", "sse_port", team.get("mcp", {}).get("sse_port") if isinstance(team.get("mcp"), dict) else None),
+        ):
+            if isinstance(port, int) and not isinstance(port, bool):
+                existing = ports.get(port)
+                port_label = f"[{section}].{key}"
+                if existing:
+                    errors.append(
+                        f"{path}: duplicate port {port} for {port_label}; "
+                        f"also used by {existing[0]} {existing[1]}"
+                    )
+                else:
+                    ports[port] = (path, port_label)
+
+    if errors:
+        joined = "\n  - ".join(errors)
+        raise ConfigError(f"Known team files are invalid:\n  - {joined}")
+
+
+def load_project_config_file(path: Path, root: Path | None = None) -> dict:
+    """Load the full config as if AGENTCHATTR_PROJECT_CONFIG pointed at path."""
+    root = root or ROOT
+    previous = os.environ.get(PROJECT_CONFIG_ENV)
+    os.environ[PROJECT_CONFIG_ENV] = str(path)
+    try:
+        return load_config(root)
+    finally:
+        if previous is None:
+            os.environ.pop(PROJECT_CONFIG_ENV, None)
+        else:
+            os.environ[PROJECT_CONFIG_ENV] = previous
 
 
 def _normalize_agent_defaults(config: dict) -> None:
@@ -191,7 +456,11 @@ def load_config(root: Path | None = None) -> dict:
                 print(f"  Warning: Ignoring local agent '{name}' (already defined in config.toml)")
 
     _load_project_config(config)
+    _apply_agent_defaults(config)
     _normalize_agent_defaults(config)
     _apply_env_overrides(config)
+    validate_config(config, source=config.get("_meta", {}).get("project_config_path", config_path))
+    if config.get("_meta", {}).get("project_config_path"):
+        validate_known_team_files(root)
 
     return config

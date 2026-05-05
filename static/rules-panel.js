@@ -112,8 +112,10 @@ function toggleRulesPanel() {
     window._preserveScroll(() => {
         const panel = document.getElementById('rules-panel');
         panel.classList.toggle('hidden');
-        document.getElementById('rules-toggle').classList.toggle('active', !panel.classList.contains('hidden'));
-        if (!panel.classList.contains('hidden')) {
+        const open = !panel.classList.contains('hidden');
+        document.body.classList.toggle('rules-panel-open', open);
+        document.getElementById('rules-toggle').classList.toggle('active', open);
+        if (open) {
             // Mark all current drafts as seen
             for (const r of window.rules) {
                 if (r.status === 'proposed' || r.status === 'draft') _seenRuleIds.add(r.id);

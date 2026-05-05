@@ -189,7 +189,7 @@ function _showSidebarRenameDialog(oldName) {
 
     const input = document.createElement('input');
     input.type = 'text';
-    input.maxLength = 20;
+    input.maxLength = 24;
     input.value = oldName;
     wrapper.appendChild(input);
 
@@ -201,7 +201,7 @@ function _showSidebarRenameDialog(oldName) {
     confirm.title = 'Rename';
     confirm.onclick = () => {
         const newName = input.value.trim().toLowerCase();
-        if (!newName || !/^[a-z0-9][a-z0-9\-]{0,19}$/.test(newName)) return;
+        if (!newName || !/^[a-z0-9][a-z0-9\-]{0,23}$/.test(newName)) return;
         if (newName !== oldName) {
             window.ws.send(JSON.stringify({ type: 'channel_rename', old_name: oldName, new_name: newName }));
             if (window.activeChannel === oldName) {
@@ -351,7 +351,7 @@ function showChannelCreateDialog() {
 
     const input = document.createElement('input');
     input.type = 'text';
-    input.maxLength = 20;
+    input.maxLength = 24;
     input.placeholder = 'channel-name';
     wrapper.appendChild(input);
 
@@ -385,7 +385,7 @@ function showChannelCreateDialog() {
 
 function _submitInlineCreate(input, wrapper) {
     const name = input.value.trim().toLowerCase();
-    if (!name || !/^[a-z0-9][a-z0-9\-]{0,19}$/.test(name)) return;
+    if (!name || !/^[a-z0-9][a-z0-9\-]{0,23}$/.test(name)) return;
     if (window.channelList.includes(name)) { input.focus(); return; }
     window._setPendingChannelSwitch(name);
     window.ws.send(JSON.stringify({ type: 'channel_create', name }));
@@ -413,7 +413,7 @@ function showChannelRenameDialog(oldName) {
 
     const input = document.createElement('input');
     input.type = 'text';
-    input.maxLength = 20;
+    input.maxLength = 24;
     input.value = oldName;
     wrapper.appendChild(input);
 
@@ -428,7 +428,7 @@ function showChannelRenameDialog(oldName) {
     confirm.title = 'Rename';
     confirm.onclick = () => {
         const newName = input.value.trim().toLowerCase();
-        if (!newName || !/^[a-z0-9][a-z0-9\-]{0,19}$/.test(newName)) return;
+        if (!newName || !/^[a-z0-9][a-z0-9\-]{0,23}$/.test(newName)) return;
         if (newName !== oldName) {
             window.ws.send(JSON.stringify({ type: 'channel_rename', old_name: oldName, new_name: newName }));
             if (window.activeChannel === oldName) {
@@ -537,6 +537,8 @@ function deleteChannel(name) {
 
 const SIDEBAR_MODE_KEY = 'agentchattr-channel-sidebar-mode';
 const SIDEBAR_WIDTH_KEY = 'agentchattr-channel-sidebar-w';
+const SIDEBAR_DEFAULT_VERSION_KEY = 'agentchattr-channel-sidebar-default-v2';
+const SIDEBAR_LAYOUT_KEY = 'agentchattr-sidebar-layout';
 
 function setChannelSidebarMode(mode, persist = true) {
     const sidebar = document.getElementById('channel-sidebar');
@@ -569,12 +571,26 @@ function setChannelSidebarMode(mode, persist = true) {
     _updateSupportLabel();
 }
 
+function setSidebarLayout(layout, persist = true) {
+    const normalized = layout === 'channels-left' ? 'channels-left' : 'agents-left';
+    document.body.classList.toggle('sidebars-agents-left', normalized === 'agents-left');
+    document.body.classList.toggle('sidebars-channels-left', normalized === 'channels-left');
+    if (persist) localStorage.setItem(SIDEBAR_LAYOUT_KEY, normalized);
+    const setting = document.getElementById('setting-sidebar-layout');
+    if (setting && setting.value !== normalized) setting.value = normalized;
+}
+
 // Swap "Support development" → "Support" when the sidebar is narrow, so the
 // text doesn't truncate. Width threshold tuned to match the pill's padding
 // plus the heart glyph.
 function _updateSupportLabel() {
     const label = document.querySelector('.channel-support .support-label');
     if (!label) return;
+    const projectLabel = label.closest('.channel-support')?.dataset.projectLabel || '';
+    if (projectLabel) {
+        label.textContent = projectLabel;
+        return;
+    }
     const inSidebar = document.body.classList.contains('channels-in-sidebar');
     if (!inSidebar) {
         label.textContent = ' Support development';
@@ -607,9 +623,9 @@ function setupChannelSidebarGrip() {
 
     document.addEventListener('mousemove', (e) => {
         if (!dragging) return;
-        // Sidebar is on the left, so dragging right grows it (positive delta).
-        const delta = e.clientX - startX;
-        const newWidth = Math.min(Math.max(startWidth + delta, 140), 400);
+        const channelsOnRight = document.body.classList.contains('sidebars-agents-left');
+        const delta = channelsOnRight ? startX - e.clientX : e.clientX - startX;
+        const newWidth = Math.min(Math.max(startWidth + delta, 180), 480);
         panel.style.setProperty('--channel-sidebar-w', newWidth + 'px');
         panel.style.width = newWidth + 'px';
         _updateSupportLabel();
@@ -627,15 +643,23 @@ function setupChannelSidebarGrip() {
 }
 
 function _restoreSidebarState() {
+    const savedLayout = localStorage.getItem(SIDEBAR_LAYOUT_KEY) || 'agents-left';
+    setSidebarLayout(savedLayout, false);
+
     const savedWidth = parseInt(localStorage.getItem(SIDEBAR_WIDTH_KEY) || '', 10);
-    if (savedWidth && savedWidth >= 140 && savedWidth <= 400) {
+    if (savedWidth && savedWidth >= 180 && savedWidth <= 480) {
         const panel = document.getElementById('channel-sidebar');
         if (panel) {
             panel.style.setProperty('--channel-sidebar-w', savedWidth + 'px');
             panel.style.width = savedWidth + 'px';
         }
     }
-    const savedMode = localStorage.getItem(SIDEBAR_MODE_KEY) || 'top';
+    let savedMode = localStorage.getItem(SIDEBAR_MODE_KEY) || 'sidebar';
+    if (!localStorage.getItem(SIDEBAR_DEFAULT_VERSION_KEY) && savedMode === 'top') {
+        savedMode = 'sidebar';
+        localStorage.setItem(SIDEBAR_MODE_KEY, savedMode);
+        localStorage.setItem(SIDEBAR_DEFAULT_VERSION_KEY, '1');
+    }
     setChannelSidebarMode(savedMode, false);
 }
 
@@ -662,6 +686,10 @@ function _channelsInit() {
     if (setting) {
         setting.addEventListener('change', () => setChannelSidebarMode(setting.value));
     }
+    const layoutSetting = document.getElementById('setting-sidebar-layout');
+    if (layoutSetting) {
+        layoutSetting.addEventListener('change', () => setSidebarLayout(layoutSetting.value));
+    }
 
     requestAnimationFrame(_syncClearChatWidth);
     window.addEventListener('resize', _syncClearChatWidth);
@@ -677,6 +705,7 @@ window.filterMessagesByChannel = filterMessagesByChannel;
 window.renderChannelTabs = renderChannelTabs;
 window.deleteChannel = deleteChannel;
 window.showChannelRenameDialog = showChannelRenameDialog;
+window.setSidebarLayout = setSidebarLayout;
 window.renderChannelSidebar = renderChannelSidebar;
 window.setChannelSidebarMode = setChannelSidebarMode;
 window.Channels = { init: _channelsInit };

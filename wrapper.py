@@ -361,7 +361,12 @@ def _build_provider_launch(
         token=token, mcp_cfg=mcp_cfg, project_dir=project_dir,
     )
 
-    launch_args = [*mcp_args, *extra_args]
+    configured_args = agent_cfg.get("args", [])
+    if isinstance(configured_args, list):
+        configured_args = [str(arg) for arg in configured_args]
+    else:
+        configured_args = []
+    launch_args = [*mcp_args, *configured_args, *extra_args]
     launch_env = dict(env)
 
     return launch_args, launch_env, inject_env, settings_path
@@ -562,13 +567,17 @@ def main():
     import urllib.error
     import urllib.request
 
-    from config_loader import apply_cli_overrides, load_config
+    from config_loader import ConfigError, apply_cli_overrides, load_config
 
     # Apply AGENTCHATTR_* overrides (from CLI flags or env) BEFORE loading
     # config so the wrapper connects to the same data_dir/ports as a server
     # launched with matching flags.
     apply_cli_overrides()
-    config = load_config(ROOT)
+    try:
+        config = load_config(ROOT)
+    except ConfigError as exc:
+        print(f"  Config error: {exc}")
+        sys.exit(1)
 
     agent_names = list(config.get("agents", {}).keys())
 

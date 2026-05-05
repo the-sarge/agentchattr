@@ -9,6 +9,7 @@ let pendingAttachments = [];
 let autoScroll = true;
 let reconnectTimer = null;
 let username = 'user';
+let selfNames = loadSelfNames();
 let agentConfig = {};  // { name: { color, label } } — registered instances (used for pills)
 let baseColors = {};   // { name: { color, label } } — base agent colors (for message coloring)
 let todos = {};  // { msg_id: "todo" | "done" }
@@ -38,6 +39,8 @@ window._setPendingChannelSwitch = function(v) { pendingChannelSwitch = v; };
 // scrollToBottom is set after function definition (see below)
 Object.defineProperty(window, 'username', { get() { return username; } });
 Object.defineProperty(window, 'agentConfig', { get() { return agentConfig; } });
+// Cross-module read bridge for search-nav filters; chat.js remains the owner.
+Object.defineProperty(window, 'todos', { get() { return todos; } });
 Object.defineProperty(window, 'ws', { get() { return ws; } });
 Object.defineProperty(window, 'soundEnabled', { get() { return soundEnabled; } });
 Object.defineProperty(window, 'rules', { get() { return rules; }, set(v) { rules = v; } });
@@ -46,6 +49,36 @@ Object.defineProperty(window, '_lastMentionedAgent', {
     get() { return _lastMentionedAgent; },
     set(v) { _lastMentionedAgent = v; },
 });
+
+function loadSelfNames() {
+    try {
+        const raw = JSON.parse(localStorage.getItem('agentchattr-self-names') || '["user"]');
+        if (Array.isArray(raw)) {
+            const names = raw.map(n => String(n || '').trim().toLowerCase()).filter(Boolean);
+            return new Set(names.length ? names : ['user']);
+        }
+    } catch (_err) {}
+    return new Set(['user']);
+}
+
+function rememberSelfName(name) {
+    const normalized = String(name || '').trim().toLowerCase();
+    if (!normalized) return;
+    selfNames.add(normalized);
+    try {
+        localStorage.setItem('agentchattr-self-names', JSON.stringify([...selfNames]));
+    } catch (_err) {}
+}
+
+function isSelfSender(sender) {
+    const normalized = String(sender || '').trim().toLowerCase();
+    if (!normalized || normalized === 'system') return false;
+    if (selfNames.has(normalized)) return true;
+    // Unknown senders are not self; during reconnects they may be agents
+    // before the registry/base-color messages have finished loading.
+    return false;
+}
+window.isSelfSender = isSelfSender;
 
 // --- Drag-scroll for overflow containers ---
 function enableDragScroll(el) {
@@ -399,7 +432,7 @@ function connectWebSocket() {
             }
         } else if (event.type === 'message') {
             // Play notification sound for new messages from others (not joins, not when focused)
-            if (soundEnabled && !document.hasFocus() && event.data.type !== 'join' && event.data.type !== 'leave' && event.data.type !== 'summary' && event.data.sender && event.data.sender.toLowerCase() !== username.toLowerCase()) {
+            if (soundEnabled && !document.hasFocus() && event.data.type !== 'join' && event.data.type !== 'leave' && event.data.type !== 'summary' && event.data.sender && !isSelfSender(event.data.sender)) {
                 playNotificationSound(event.data.sender);
             }
             appendMessage(event.data);
@@ -746,7 +779,7 @@ function appendMessage(msg) {
         if (isError) el.classList.add('error-msg');
 
         // Update last mentioned agent if message is from user (Ben)
-        if (msg.sender.toLowerCase() === username.toLowerCase()) {
+        if (isSelfSender(msg.sender)) {
             const mentions = msg.text.match(/@(\w[\w-]*)/g);
             if (mentions) {
                 const lastMention = mentions[mentions.length - 1].slice(1).toLowerCase();
@@ -760,7 +793,7 @@ function appendMessage(msg) {
         let textHtml = styleHashtags(renderMarkdown(msg.text));
 
         const senderColor = getColor(msg.sender);
-        const isSelf = msg.sender.toLowerCase() === username.toLowerCase();
+        const isSelf = isSelfSender(msg.sender);
         el.classList.add(isSelf ? 'self' : 'other');
 
         let attachmentsHtml = '';
@@ -826,7 +859,7 @@ function appendMessage(msg) {
             channelUnread[msgChannel] = (channelUnread[msgChannel] || 0) + 1;
             renderChannelTabs();
             // Play soft pluck for cross-channel chat messages from others (only when focused)
-            if (document.hasFocus() && msg.type === 'chat' && msg.sender && msg.sender.toLowerCase() !== username.toLowerCase()) {
+            if (document.hasFocus() && msg.type === 'chat' && msg.sender && !isSelfSender(msg.sender)) {
                 playCrossChannelSound();
             }
         }
@@ -1732,10 +1765,11 @@ let pendingChannelSwitch = null;
 function applySettings(data) {
     if (data.title) {
         document.getElementById('room-title').textContent = data.title;
-        document.title = data.title;
+        if (!window.agentchattrProjectTitle) document.title = data.title;
     }
     if (data.username) {
         username = data.username;
+        rememberSelfName(username);
         document.getElementById('sender-label').textContent = username;
         document.getElementById('setting-username').value = username;
     }
@@ -1870,7 +1904,7 @@ function saveSettings() {
             data: {
                 username: newUsername || 'user',
                 font: newFont,
-                max_agent_hops: parseInt(newHops) || 4,
+                max_agent_hops: parseInt(newHops) || 100,
                 history_limit: newHistory,
                 contrast: newContrast,
                 rules_refresh_interval: parseInt(newRulesRefresh) || 0,
@@ -2001,10 +2035,27 @@ async function importHistory(input) {
 
 // --- Keyboard shortcuts ---
 
+function focusMessageInput() {
+    const input = document.getElementById('input');
+    if (!input) return;
+    window.closeSearchNav?.();
+    input.focus({ preventScroll: true });
+    const pos = input.value.length;
+    input.setSelectionRange(pos, pos);
+}
+
 function setupKeyboardShortcuts() {
     document.addEventListener('keydown', (e) => {
         const modal = document.getElementById('image-modal');
         const modalOpen = modal && !modal.classList.contains('hidden');
+
+        if ((e.metaKey || e.ctrlKey) && !e.shiftKey && !e.altKey && e.key === '.') {
+            if (!modalOpen) {
+                e.preventDefault();
+                focusMessageInput();
+            }
+            return;
+        }
 
         if (e.key === 'Escape') {
             const nameModal = document.getElementById('agent-name-modal');
@@ -2037,12 +2088,7 @@ function showSlashHint(text) {
 }
 
 const SLASH_COMMANDS = [
-    { cmd: '/artchallenge', desc: 'SVG art challenge — all agents create artwork (optional theme)', broadcast: true },
-    { cmd: '/hatmaking', desc: 'All agents design a hat to wear on their avatar', broadcast: true },
     { cmd: '/roastreview', desc: 'Get all agents to review and roast each other\'s work', broadcast: true },
-    { cmd: '/poetry haiku', desc: 'Agents write a haiku about the codebase', broadcast: true },
-    { cmd: '/poetry limerick', desc: 'Agents write a limerick about the codebase', broadcast: true },
-    { cmd: '/poetry sonnet', desc: 'Agents write a sonnet about the codebase', broadcast: true },
     { cmd: '/summary', desc: 'Summarize recent messages — tag an agent (e.g. /summary @claude)', broadcast: false, needsMention: true },
     { cmd: '/summarise', desc: 'Summarize recent messages — tag an agent (e.g. /summarise @claude)', broadcast: false, needsMention: true, hidden: true },
     { cmd: '/continue', desc: 'Resume after loop guard pauses', broadcast: false },
@@ -2057,7 +2103,7 @@ let mentionMenuStart = -1;  // cursor position of the '@'
 
 function updateSlashMenu(text) {
     const menu = document.getElementById('slash-menu');
-    if (!text.startsWith('/') || text.includes(' ') && !text.startsWith('/poetry')) {
+    if (!text.startsWith('/') || text.includes(' ')) {
         menu.classList.add('hidden');
         slashMenuVisible = false;
         return;
@@ -2105,13 +2151,13 @@ function selectSlashCommand(cmd) {
 // --- Mention autocomplete ---
 
 function getMentionCandidates() {
-    // Build list: registered agents + "all agents" + username (self) + known humans
+    // Build list: registered agents + @all broadcast.
     const candidates = [];
     for (const [name, cfg] of Object.entries(agentConfig)) {
         if (cfg.state === 'pending') continue;
         candidates.push({ name, label: cfg.label || name, color: cfg.color });
     }
-    candidates.push({ name: 'all agents', label: 'all agents', color: 'var(--accent)' });
+    candidates.push({ name: 'all', label: 'all', color: 'var(--accent)' });
     return candidates;
 }
 
@@ -2132,8 +2178,7 @@ function updateMentionMenu() {
     let atPos = -1;
     for (let i = cursor - 1; i >= 0; i--) {
         if (text[i] === '@') { atPos = i; break; }
-        // Allow spaces if we are still matching a multi-word label like "all agents"
-        if (!/[\w\-\s]/.test(text[i])) break;
+        if (!/[\w\-]/.test(text[i])) break;
         // Optimization: don't look back more than 30 chars
         if (cursor - i > 30) break;
     }
@@ -3652,7 +3697,7 @@ function _helpCardDefs() {
             row: 'top',
             html:
             '<div class="hg-module-title">Agents <span class="hg-loc">header pills</span></div>' +
-            '<p class="hg-module-desc">The status pills in the header show who is here and what they\'re doing.</p>' +
+            '<p class="hg-module-desc">The status pills in the Agents rail show who is here and what they\'re doing.</p>' +
             '<div class="hg-mock-row">' +
                 '<div class="hg-mock-pill hg-pill-available">' +
                     '<span class="hg-mock-dot" style="background:#f97316"></span>' +

@@ -1,24 +1,24 @@
 [project]
-name = "project-a"
-title = "Project A"
-accent_color = "#7c3aed"
-tmux_prefix = "agentchattr-project-a"
+name = "large-roster"
+title = "Large Roster"
+accent_color = "#4285f4"
+tmux_prefix = "agentchattr-large-roster"
 # repo_url = "https://github.com/owner/repo"
 # board_url = "https://github.com/orgs/owner/projects/1"  # replaces Support pill with "Project Board"
 # link_label = "Project Board"  # optional override for the pill label
 # link_url = "https://github.com/orgs/owner/projects/1/views/1"  # optional override for the pill URL
 
 [server]
-port = 8301
+port = 8320
 host = "127.0.0.1"
-data_dir = "./data/project-a"
+data_dir = "./data/large-roster"
 
 [mcp]
-http_port = 8211
-sse_port = 8212
+http_port = 8230
+sse_port = 8231
 
 [images]
-upload_dir = "./uploads/project-a"
+upload_dir = "./uploads/large-roster"
 
 [routing]
 default = "none"
@@ -29,66 +29,37 @@ cwd = ".."
 
 [agent_defaults.codex]
 cwd = ".."
+args = ["--ask-for-approval", "never"]
 
 [agent_defaults.gemini]
 cwd = ".."
 
 [agents.claude-planner]
 provider = "claude"
-color = "#da7756"
 label = "Claude Planner"
 role = "Planner"
-
-[agents.claude-builder]
-provider = "claude"
-color = "#10a37f"
-label = "Claude Builder"
-role = "Builder"
+color = "#da7756"
 
 [agents.claude-reviewer]
 provider = "claude"
-color = "#8b5cf6"
 label = "Claude Reviewer"
 role = "Reviewer"
-
-[agents.claude-tester]
-provider = "claude"
-color = "#f59e0b"
-label = "Claude Tester"
-role = "Tester"
-
-[agents.claude-docs]
-provider = "claude"
-color = "#3b82f6"
-label = "Claude Docs"
-role = "Docs"
+color = "#8b5cf6"
 
 [agents.codex-builder]
 provider = "codex"
-color = "#14b8a6"
 label = "Codex Builder"
 role = "Builder"
-
-[agents.codex-reviewer]
-provider = "codex"
-color = "#ef4444"
-label = "Codex Reviewer"
-role = "Reviewer"
+color = "#10a37f"
 
 [agents.codex-tester]
 provider = "codex"
-color = "#84cc16"
 label = "Codex Tester"
 role = "Tester"
-
-[agents.codex-docs]
-provider = "codex"
-color = "#06b6d4"
-label = "Codex Docs"
-role = "Docs"
+color = "#84cc16"
 
 [agents.gemini-research]
 provider = "gemini"
-color = "#4285f4"
 label = "Gemini Research"
 role = "Researcher"
+color = "#4285f4"

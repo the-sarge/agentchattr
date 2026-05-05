@@ -1,0 +1,44 @@
+[project]
+name = "two-agent"
+title = "Two Agent Room"
+accent_color = "#10a37f"
+tmux_prefix = "agentchattr-two-agent"
+# repo_url = "https://github.com/owner/repo"
+# board_url = "https://github.com/orgs/owner/projects/1"  # replaces Support pill with "Project Board"
+# link_label = "Project Board"  # optional override for the pill label
+# link_url = "https://github.com/orgs/owner/projects/1/views/1"  # optional override for the pill URL
+
+[server]
+port = 8310
+host = "127.0.0.1"
+data_dir = "./data/two-agent"
+
+[mcp]
+http_port = 8220
+sse_port = 8221
+
+[images]
+upload_dir = "./uploads/two-agent"
+
+[routing]
+default = "none"
+max_agent_hops = 100
+
+[agent_defaults.claude]
+cwd = ".."
+args = ["--dangerously-skip-permissions"]
+
+[agent_defaults.codex]
+cwd = ".."
+
+[agents.architect]
+provider = "claude"
+label = "Architect"
+role = "Planner"
+color = "#da7756"
+
+[agents.builder]
+provider = "codex"
+label = "Builder"
+role = "Builder"
+color = "#10a37f"
