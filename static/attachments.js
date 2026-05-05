@@ -7,14 +7,17 @@
     let pendingAttachments = [];
     let modalImages = [];
     let modalIndex = 0;
+    const missingBridges = new Set();
 
     function reportMissingBridge(name) {
+        if (missingBridges.has(name)) return;
+        missingBridges.add(name);
         console.error(`Attachments: ${name} bridge not registered`);
     }
 
     function getSessionToken() {
-        const token = window.SESSION_TOKEN || window.__SESSION_TOKEN__ || '';
-        if (!token) reportMissingBridge('window.SESSION_TOKEN');
+        const token = window.__SESSION_TOKEN__ || window.SESSION_TOKEN || '';
+        if (!token) reportMissingBridge('window.__SESSION_TOKEN__');
         return token;
     }
 
@@ -58,6 +61,7 @@
             pendingAttachments = items.slice();
         }
         renderAttachments();
+        refreshSendButton();
     }
 
     function setupPaste() {
