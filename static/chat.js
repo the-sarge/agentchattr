@@ -2652,6 +2652,17 @@ function escapeHtml(text) {
 }
 window.escapeHtml = escapeHtml;
 
+function escapeAttr(value) {
+    return String(value ?? '').replace(/[&<>"']/g, (ch) => ({
+        '&': '&amp;',
+        '<': '&lt;',
+        '>': '&gt;',
+        '"': '&quot;',
+        "'": '&#39;',
+    }[ch]));
+}
+window.escapeAttr = escapeAttr;
+
 // Schedule strip and popover are provided by schedules.js.
 
 // --- Decision card resolve (with fade animation) ---
