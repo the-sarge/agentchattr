@@ -1,6 +1,7 @@
 [project]
 name = "large-roster"
 title = "Large Roster"
+# username = "josh"
 accent_color = "#4285f4"
 tmux_prefix = "agentchattr-large-roster"
 # repo_url = "https://github.com/owner/repo"

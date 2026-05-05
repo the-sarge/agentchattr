@@ -1,6 +1,7 @@
 [project]
 name = "api-agent"
 title = "API Agent Room"
+# username = "josh"
 accent_color = "#2fe898"
 tmux_prefix = "agentchattr-api-agent"
 # repo_url = "https://github.com/owner/repo"

@@ -1,6 +1,7 @@
 [project]
 name = "project-a"
 title = "Project A"
+# username = "josh"
 accent_color = "#7c3aed"
 tmux_prefix = "agentchattr-project-a"
 # repo_url = "https://github.com/owner/repo"

@@ -135,12 +135,21 @@ def _settings_path() -> Path:
 def _load_settings():
     global room_settings
     p = _settings_path()
+    saved = {}
     if p.exists():
         try:
             saved = json.loads(p.read_text("utf-8"))
-            room_settings.update(saved)
+            if isinstance(saved, dict):
+                room_settings.update(saved)
+            else:
+                saved = {}
         except Exception:
-            pass
+            saved = {}
+    project = config.get("project", {})
+    if isinstance(project, dict) and "username" not in saved:
+        project_username = project.get("username")
+        if isinstance(project_username, str) and project_username.strip():
+            room_settings["username"] = project_username.strip()
     if room_settings.get("settings_version") is None and room_settings.get("max_agent_hops") == 4:
         room_settings["max_agent_hops"] = 100
     room_settings["settings_version"] = 2
@@ -1663,6 +1672,33 @@ async def get_messages(since_id: int = 0, limit: int = 50, channel: str = ""):
     if since_id:
         return store.get_since(since_id, channel=ch)
     return store.get_recent(limit, channel=ch)
+
+
+@app.get("/api/search")
+async def search_messages(
+    q: str = "",
+    sender: str = "",
+    channel: str = "",
+    pinned: bool = False,
+    todo: bool = False,
+    done: bool = False,
+    jobs: bool = False,
+    session: bool = False,
+    system: bool = False,
+    limit: int = 120,
+):
+    return store.search(
+        query=q,
+        sender=sender,
+        channel=channel,
+        pinned=pinned,
+        todo=todo,
+        done=done,
+        jobs=jobs,
+        session=session,
+        system=system,
+        limit=limit,
+    )
 
 
 @app.post("/api/send")

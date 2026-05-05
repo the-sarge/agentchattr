@@ -123,7 +123,7 @@ Agents interact with channels via MCP: `chat_send(channel="debug")`, `chat_read(
 When agents are triggered by an @mention, the wrapper injects `use mcp to read #channel-name - you're mentioned, take appropriate action and respond` so the agent reads the right channel automatically. Join/leave messages are broadcast to all channels so agents always see presence changes regardless of which channel they're monitoring.
 
 ### Search and command palette
-Open search from the header or press `Cmd/Ctrl+K`. Search recent messages across channels, filter by sender/channel/pinned/todo/done/jobs/session/system messages, switch channels, open Jobs/Rules/Agent Operations, copy tmux attach commands, or send `/continue` from one palette.
+Open search from the header or press `Cmd/Ctrl+K`. Search project message history across channels, filter by sender/channel/pinned/todo/done/jobs/session/system messages, switch channels, open Jobs/Rules/Agent Operations, copy tmux attach commands, or send `/continue` from one palette.
 
 ### Agent Operations
 The header operations button opens a right-side panel with project metadata, ports, data/upload paths, configured agents, registered agents, heartbeat age, busy/available state, tmux session names, and attach-command copy buttons. It flags common mismatches such as configured agents that never registered or wrappers running without a live heartbeat.
@@ -511,6 +511,7 @@ Example `teams/project-a.toml`:
 [project]
 name = "project-a"
 title = "Project A"
+username = "josh"  # optional; seeds Settings -> Name for a fresh project
 accent_color = "#7c3aed"
 tmux_prefix = "agentchattr-project-a"
 # repo_url = "https://github.com/owner/repo"

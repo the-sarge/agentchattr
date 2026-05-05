@@ -161,6 +161,21 @@
     white-space: nowrap;
 }
 
+.search-nav-match {
+    color: var(--text);
+    background: color-mix(in srgb, var(--accent) 35%, transparent);
+    border-radius: 3px;
+    padding: 0 2px;
+}
+
+.search-nav-status {
+    border-top: 1px solid var(--border-subtle);
+    color: var(--text-dim);
+    font-size: 11px;
+    line-height: 1.4;
+    padding: 8px 12px;
+}
+
 .search-nav-empty {
     color: var(--text-dim);
     font-size: 13px;

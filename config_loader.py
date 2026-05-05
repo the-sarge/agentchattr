@@ -313,6 +313,9 @@ def validate_config(
         project = {}
     if require_project and not str(project.get("tmux_prefix", "")).strip():
         errors.append("[project].tmux_prefix is required in team files")
+    project_username = project.get("username")
+    if project_username is not None and not isinstance(project_username, str):
+        errors.append("[project].username must be a string")
     _validate_color(project.get("accent_color"), "[project].accent_color", errors)
     for key in ("repo_url", "github_url", "board_url", "github_project_url", "link_url"):
         _validate_http_url(project.get(key), f"[project].{key}", errors)

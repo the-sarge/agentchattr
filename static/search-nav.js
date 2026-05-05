@@ -1,8 +1,20 @@
 (function() {
+    const SEARCH_LIMIT = 120;
+
     let messages = [];
     let commands = [];
+    let facets = { senders: [], channels: [] };
     let activeIndex = 0;
     let lastOps = null;
+    let isSearching = false;
+    let searchTimer = null;
+    let searchSeq = 0;
+    let searchMeta = {
+        returned: 0,
+        limit: SEARCH_LIMIT,
+        total_scanned: 0,
+        truncated: false,
+    };
 
     function tokenHeaders() {
         const token = window.__SESSION_TOKEN__ || window.SESSION_TOKEN || '';
@@ -46,6 +58,7 @@
                     <label><input type="checkbox" id="search-nav-system"> system</label>
                 </div>
                 <div id="search-nav-results" class="search-nav-results"></div>
+                <div id="search-nav-status" class="search-nav-status"></div>
             </div>
         `;
         backdrop.addEventListener('click', event => {
@@ -54,19 +67,70 @@
         document.body.appendChild(backdrop);
 
         const input = document.getElementById('search-nav-input');
-        input.addEventListener('input', render);
+        input.addEventListener('input', () => scheduleSearch(150));
         input.addEventListener('keydown', handleInputKeydown);
         document.getElementById('search-nav-close').addEventListener('click', closeSearchNav);
         backdrop.querySelectorAll('select,input[type="checkbox"]').forEach(el => {
-            el.addEventListener('change', render);
+            el.addEventListener('change', () => scheduleSearch(0));
         });
         return backdrop;
     }
 
-    async function fetchMessages() {
-        const resp = await fetch('/api/messages?limit=500', { headers: tokenHeaders() });
-        if (!resp.ok) return [];
-        return resp.json();
+    function searchParams(filters) {
+        const params = new URLSearchParams();
+        params.set('limit', String(SEARCH_LIMIT));
+        if (filters.query) params.set('q', filters.query);
+        if (filters.sender) params.set('sender', filters.sender);
+        if (filters.channel) params.set('channel', filters.channel);
+        for (const key of ['pinned', 'todo', 'done', 'jobs', 'session', 'system']) {
+            if (filters[key]) params.set(key, 'true');
+        }
+        return params;
+    }
+
+    async function fetchSearchResults(filters) {
+        const seq = ++searchSeq;
+        if (filters.query.startsWith('>')) {
+            messages = [];
+            searchMeta = { returned: 0, limit: SEARCH_LIMIT, total_scanned: 0, truncated: false };
+            isSearching = false;
+            render();
+            return;
+        }
+
+        isSearching = true;
+        render();
+        try {
+            const resp = await fetch(`/api/search?${searchParams(filters).toString()}`, { headers: tokenHeaders() });
+            if (seq !== searchSeq) return;
+            if (!resp.ok) throw new Error(`search failed: ${resp.status}`);
+            const payload = await resp.json();
+            messages = Array.isArray(payload.results) ? payload.results : [];
+            facets = payload.facets || { senders: [], channels: [] };
+            searchMeta = {
+                returned: Number(payload.returned || messages.length),
+                limit: Number(payload.limit || SEARCH_LIMIT),
+                total_scanned: Number(payload.total_scanned || 0),
+                truncated: Boolean(payload.truncated),
+            };
+        } catch (_err) {
+            if (seq !== searchSeq) return;
+            messages = [];
+            searchMeta = {
+                returned: 0,
+                limit: SEARCH_LIMIT,
+                total_scanned: 0,
+                truncated: false,
+                error: true,
+            };
+        } finally {
+            if (seq === searchSeq) {
+                isSearching = false;
+                buildCommands();
+                populateFilters();
+                render();
+            }
+        }
     }
 
     async function fetchOps() {
@@ -79,11 +143,27 @@
     }
 
     async function refreshData() {
-        const [msgs] = await Promise.all([fetchMessages(), fetchOps()]);
-        messages = Array.isArray(msgs) ? msgs.slice().reverse() : [];
+        await fetchOps();
         buildCommands();
         populateFilters();
+        fetchSearchResults(currentFilters());
+    }
+
+    function scheduleSearch(delay) {
+        clearTimeout(searchTimer);
+        activeIndex = 0;
+        const filters = currentFilters();
+        if (filters.query.startsWith('>')) {
+            ++searchSeq;
+            messages = [];
+            isSearching = false;
+            searchMeta = { returned: 0, limit: SEARCH_LIMIT, total_scanned: 0, truncated: false };
+            render();
+            return;
+        }
+        isSearching = true;
         render();
+        searchTimer = setTimeout(() => fetchSearchResults(currentFilters()), delay);
     }
 
     function buildCommands() {
@@ -104,19 +184,19 @@
         items.push({
             title: 'Open Jobs',
             detail: 'panel',
-            keywords: 'jobs tasks work',
+            keywords: 'jobs job tasks work',
             run: () => openPanel('jobs-panel', window.toggleJobsPanel),
         });
         items.push({
             title: 'Open Rules',
             detail: 'panel',
-            keywords: 'rules decisions',
+            keywords: 'rules decisions decision remind',
             run: () => openPanel('rules-panel', window.toggleRulesPanel),
         });
         items.push({
             title: 'Open Agent Operations',
             detail: 'panel',
-            keywords: 'agent operations ops tmux status',
+            keywords: 'agent agents operations ops tmux status services project',
             run: () => window.toggleAgentOpsPanel?.(true),
         });
         items.push({
@@ -140,7 +220,7 @@
                 items.push({
                     title: `Copy attach command for ${agent.label || agent.name}`,
                     detail: 'tmux',
-                    keywords: `copy attach tmux ${agent.name} ${agent.label || ''}`,
+                    keywords: `copy attach tmux live ${agent.name} ${agent.label || ''}`,
                     run: () => copyText(agent.attach.live),
                 });
             }
@@ -174,21 +254,34 @@
         }
     }
 
+    function uniqueSorted(values) {
+        return [...new Set(values.filter(Boolean).map(v => String(v)))].sort((a, b) => a.localeCompare(b));
+    }
+
     function populateFilters() {
         const senderSelect = document.getElementById('search-nav-sender');
         const channelSelect = document.getElementById('search-nav-channel');
         if (!senderSelect || !channelSelect) return;
         const senderValue = senderSelect.value;
         const channelValue = channelSelect.value;
-        const senders = [...new Set(messages.map(m => m.sender).filter(Boolean))].sort();
-        const channels = [...new Set([
+        const configuredSenders = (lastOps?.configured_agents || []).map(agent => agent.name);
+        const senders = uniqueSorted([
+            ...(facets.senders || []),
+            ...configuredSenders,
+            ...messages.map(m => m.sender),
+        ]);
+        const channels = uniqueSorted([
             ...(Array.isArray(window.channelList) ? window.channelList : []),
+            ...(facets.channels || []),
             ...messages.map(m => m.channel || 'general'),
-        ].filter(Boolean))].sort();
+        ]);
+        if (senderValue && !senders.includes(senderValue)) senders.unshift(senderValue);
+        if (channelValue && !channels.includes(channelValue)) channels.unshift(channelValue);
+
         senderSelect.innerHTML = '<option value="">Any sender</option>' + senders.map(s => `<option value="${esc(s)}">${esc(s)}</option>`).join('');
         channelSelect.innerHTML = '<option value="">Any channel</option>' + channels.map(ch => `<option value="${esc(ch)}">#${esc(ch)}</option>`).join('');
-        senderSelect.value = senders.includes(senderValue) ? senderValue : '';
-        channelSelect.value = channels.includes(channelValue) ? channelValue : '';
+        senderSelect.value = senderValue;
+        channelSelect.value = channelValue;
     }
 
     function currentFilters() {
@@ -212,15 +305,17 @@
         const commandOnly = filters.query.startsWith('>');
         const query = filters.query.replace(/^>\s*/, '').toLowerCase();
         const commandMatches = commandMatchesForQuery(query);
-        const messageMatches = commandOnly ? [] : messages.filter(msg => matchesMessage(msg, filters)).slice(0, 80);
+        const messageMatches = commandOnly || isSearching ? [] : messages.slice(0, SEARCH_LIMIT);
         const parts = [];
         if (commandMatches.length) {
             parts.push('<div class="search-nav-group">Commands</div>');
-            parts.push(commandMatches.map((cmd, idx) => renderCommand(cmd, idx)).join(''));
+            parts.push(commandMatches.map((cmd, idx) => renderCommand(cmd, idx, filters.query)).join(''));
         }
-        if (messageMatches.length) {
+        if (isSearching && !commandOnly) {
+            parts.push('<div class="search-nav-empty">Searching messages...</div>');
+        } else if (messageMatches.length) {
             parts.push('<div class="search-nav-group">Messages</div>');
-            parts.push(messageMatches.map((msg, idx) => renderMessageResult(msg, commandMatches.length + idx)).join(''));
+            parts.push(messageMatches.map((msg, idx) => renderMessageResult(msg, commandMatches.length + idx, filters.query)).join(''));
         }
         if (!parts.length) {
             parts.push('<div class="search-nav-empty">No matches.</div>');
@@ -233,60 +328,84 @@
                 updateActive();
             });
         });
+        updateStatus(commandOnly, commandMatches.length, messageMatches.length);
         updateActive();
     }
 
-    function matchesMessage(msg, filters) {
-        if (filters.query.startsWith('>')) return false;
-        const query = filters.query.toLowerCase();
-        const senderQuery = query.startsWith('@') ? query.slice(1) : '';
-        if (query === '@') return false;
-        const content = textOf(msg).toLowerCase();
-        if (senderQuery) {
-            const sender = String(msg.sender || '').toLowerCase();
-            if (!sender.startsWith(senderQuery)) return false;
-        } else if (query && !content.includes(query)) {
-            return false;
-        }
-        if (filters.sender && msg.sender !== filters.sender) return false;
-        if (filters.channel && (msg.channel || 'general') !== filters.channel) return false;
-
-        const todoStatus = window.todos?.[msg.id] || null;
-        const typeFilters = [];
-        if (filters.pinned) typeFilters.push(Boolean(todoStatus));
-        if (filters.todo) typeFilters.push(todoStatus === 'todo');
-        if (filters.done) typeFilters.push(todoStatus === 'done');
-        if (filters.jobs) typeFilters.push(Boolean(msg.job_id || msg.metadata?.job_id));
-        if (filters.session) typeFilters.push(Boolean(msg.type === 'session' || msg.metadata?.session_id || msg.metadata?.session_run_id));
-        if (filters.system) typeFilters.push(Boolean(msg.sender === 'system' || ['join', 'leave', 'summary', 'system'].includes(msg.type)));
-        return !typeFilters.length || typeFilters.some(Boolean);
-    }
-
-    function renderCommand(cmd, idx) {
+    function renderCommand(cmd, idx, rawQuery) {
         return `
             <button class="search-nav-item" data-index="${idx}" data-kind="command">
                 <div class="search-nav-main">
-                    <div class="search-nav-title"><span>${esc(cmd.title)}</span></div>
-                    <div class="search-nav-snippet">${esc(cmd.keywords || '')}</div>
+                    <div class="search-nav-title"><span>${highlightText(cmd.title, rawQuery)}</span></div>
+                    <div class="search-nav-snippet">${highlightText(cmd.keywords || '', rawQuery)}</div>
                 </div>
                 <div class="search-nav-meta">${esc(cmd.detail || '')}</div>
             </button>
         `;
     }
 
-    function renderMessageResult(msg, idx) {
+    function renderMessageResult(msg, idx, rawQuery) {
         const text = textOf(msg).replace(/\s+/g, ' ').trim();
         const title = `${msg.sender || 'unknown'} in #${msg.channel || 'general'}`;
-        const meta = msg.time || (msg.timestamp ? new Date(msg.timestamp * 1000).toLocaleString() : '');
+        const metaParts = [];
+        if (msg.time) metaParts.push(msg.time);
+        const todoStatus = msg.todo_status || window.todos?.[msg.id] || '';
+        if (todoStatus) metaParts.push(todoStatus);
+        const meta = metaParts.join(' | ') || (msg.timestamp ? new Date(msg.timestamp * 1000).toLocaleString() : '');
+        const snippet = snippetForQuery(text || '(no text)', rawQuery);
         return `
             <button class="search-nav-item" data-index="${idx}" data-kind="message" data-id="${esc(msg.id)}" data-channel="${esc(msg.channel || 'general')}">
                 <div class="search-nav-main">
                     <div class="search-nav-title"><span>${esc(title)}</span></div>
-                    <div class="search-nav-snippet">${esc(text || '(no text)')}</div>
+                    <div class="search-nav-snippet">${highlightText(snippet, rawQuery)}</div>
                 </div>
                 <div class="search-nav-meta">${esc(meta)}</div>
             </button>
         `;
+    }
+
+    function highlightText(value, rawQuery) {
+        const text = String(value ?? '');
+        const query = rawQuery.replace(/^>\s*/, '').trim();
+        if (!query || query.startsWith('@')) return esc(text);
+        const lower = text.toLowerCase();
+        const needle = query.toLowerCase();
+        const idx = lower.indexOf(needle);
+        if (idx < 0) return esc(text);
+        return `${esc(text.slice(0, idx))}<mark class="search-nav-match">${esc(text.slice(idx, idx + needle.length))}</mark>${esc(text.slice(idx + needle.length))}`;
+    }
+
+    function snippetForQuery(text, rawQuery) {
+        const query = rawQuery.replace(/^>\s*/, '').trim().toLowerCase();
+        if (!query || query.startsWith('@')) return text;
+        const lower = text.toLowerCase();
+        const idx = lower.indexOf(query);
+        if (idx < 0) return text;
+        const start = Math.max(0, idx - 64);
+        const end = Math.min(text.length, idx + query.length + 112);
+        return `${start > 0 ? '... ' : ''}${text.slice(start, end)}${end < text.length ? ' ...' : ''}`;
+    }
+
+    function updateStatus(commandOnly, commandCount, messageCount) {
+        const status = document.getElementById('search-nav-status');
+        if (!status) return;
+        if (isSearching && !commandOnly) {
+            status.textContent = 'Searching full history...';
+            return;
+        }
+        if (searchMeta.error) {
+            status.textContent = 'Search failed. Commands are still available.';
+            return;
+        }
+        const parts = [];
+        if (commandCount) parts.push(`${commandCount} command${commandCount === 1 ? '' : 's'}`);
+        if (!commandOnly) {
+            parts.push(`${messageCount} message${messageCount === 1 ? '' : 's'}`);
+            if (searchMeta.truncated) parts.push(`showing first ${searchMeta.limit}`);
+        }
+        parts.push('Enter opens');
+        parts.push('Cmd/Ctrl+. focuses composer');
+        status.textContent = parts.join(' | ');
     }
 
     function updateActive() {
@@ -298,6 +417,7 @@
         if (activeIndex < 0) activeIndex = items.length - 1;
         if (activeIndex >= items.length) activeIndex = 0;
         items.forEach((item, idx) => item.classList.toggle('active', idx === activeIndex));
+        items[activeIndex]?.scrollIntoView({ block: 'nearest' });
     }
 
     function activateCurrent() {
@@ -317,7 +437,7 @@
             const channel = item.dataset.channel || 'general';
             closeSearchNav();
             if (window.activeChannel !== channel) window.switchChannel?.(channel);
-            setTimeout(() => window.scrollToMessage?.(id), 80);
+            setTimeout(() => window.scrollToMessage?.(id), 120);
         }
     }
 
@@ -352,6 +472,7 @@
     }
 
     function handleInputKeydown(event) {
+        const pageStep = 8;
         if (event.key === 'Escape') {
             event.preventDefault();
             closeSearchNav();
@@ -362,6 +483,22 @@
         } else if (event.key === 'ArrowUp') {
             event.preventDefault();
             activeIndex -= 1;
+            updateActive();
+        } else if (event.key === 'PageDown') {
+            event.preventDefault();
+            activeIndex += pageStep;
+            updateActive();
+        } else if (event.key === 'PageUp') {
+            event.preventDefault();
+            activeIndex -= pageStep;
+            updateActive();
+        } else if (event.key === 'Home') {
+            event.preventDefault();
+            activeIndex = 0;
+            updateActive();
+        } else if (event.key === 'End') {
+            event.preventDefault();
+            activeIndex = 99999;
             updateActive();
         } else if (event.key === 'Enter') {
             event.preventDefault();
@@ -379,6 +516,7 @@
     };
 
     window.closeSearchNav = function() {
+        clearTimeout(searchTimer);
         const backdrop = document.getElementById('search-nav-backdrop');
         if (backdrop) backdrop.classList.add('hidden');
         document.getElementById('search-nav-toggle')?.classList.remove('active');

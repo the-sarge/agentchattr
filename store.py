@@ -135,6 +135,119 @@ class MessageStore:
                 msgs = [m for m in msgs if m.get("channel", "general") == channel]
             return msgs
 
+    def search(
+        self,
+        query: str = "",
+        sender: str = "",
+        channel: str = "",
+        pinned: bool = False,
+        todo: bool = False,
+        done: bool = False,
+        jobs: bool = False,
+        session: bool = False,
+        system: bool = False,
+        limit: int = 120,
+    ) -> dict:
+        """Search messages newest-first with command-palette filters."""
+        query = (query or "").strip().lower()
+        sender = (sender or "").strip()
+        channel = (channel or "").strip()
+        limit = max(1, min(int(limit or 120), 500))
+        sender_query = query[1:] if query.startswith("@") else ""
+        type_filters_enabled = any((pinned, todo, done, jobs, session, system))
+        results: list[dict] = []
+        truncated = False
+
+        with self._lock:
+            total_scanned = len(self._messages)
+            for msg in reversed(self._messages):
+                if sender and msg.get("sender") != sender:
+                    continue
+                if channel and msg.get("channel", "general") != channel:
+                    continue
+
+                if query == "@":
+                    continue
+                if sender_query:
+                    msg_sender = str(msg.get("sender", "")).lower()
+                    if not msg_sender.startswith(sender_query):
+                        continue
+                elif query:
+                    text = str(msg.get("text") or msg.get("body") or msg.get("message") or "").lower()
+                    if query not in text:
+                        continue
+
+                todo_status = self._todos.get(msg["id"])
+                if type_filters_enabled and not self._matches_search_type_filters(
+                    msg,
+                    todo_status=todo_status,
+                    pinned=pinned,
+                    todo=todo,
+                    done=done,
+                    jobs=jobs,
+                    session=session,
+                    system=system,
+                ):
+                    continue
+
+                row = dict(msg)
+                if todo_status:
+                    row["todo_status"] = todo_status
+                results.append(row)
+                if len(results) > limit:
+                    truncated = True
+                    results = results[:limit]
+                    break
+
+            facets = {
+                "senders": sorted({str(m.get("sender")) for m in self._messages if m.get("sender")}),
+                "channels": sorted({str(m.get("channel", "general")) for m in self._messages if m.get("channel", "general")}),
+            }
+
+        return {
+            "results": results,
+            "facets": facets,
+            "returned": len(results),
+            "limit": limit,
+            "total_scanned": total_scanned,
+            "truncated": truncated,
+        }
+
+    def _matches_search_type_filters(
+        self,
+        msg: dict,
+        *,
+        todo_status: str | None,
+        pinned: bool,
+        todo: bool,
+        done: bool,
+        jobs: bool,
+        session: bool,
+        system: bool,
+    ) -> bool:
+        metadata = msg.get("metadata") or {}
+        matches = []
+        if pinned:
+            matches.append(bool(todo_status))
+        if todo:
+            matches.append(todo_status == "todo")
+        if done:
+            matches.append(todo_status == "done")
+        if jobs:
+            matches.append(bool(msg.get("job_id") or metadata.get("job_id")))
+        if session:
+            matches.append(bool(
+                msg.get("type") == "session"
+                or metadata.get("session_id")
+                or metadata.get("session_run_id")
+            ))
+        if system:
+            matches.append(bool(
+                msg.get("sender") == "system"
+                or msg.get("type") in {"join", "leave", "summary", "system"}
+            ))
+        return any(matches)
+
     def delete(self, msg_ids: list[int]) -> list[int]:
         """Delete messages by ID. Returns list of IDs actually deleted."""
         deleted = []

@@ -1,5 +1,7 @@
 import os
 import sys
+import json
+import tempfile
 import time
 import unittest
 from pathlib import Path
@@ -99,6 +101,57 @@ class ProjectApiPayloadTests(unittest.TestCase):
     def test_channel_name_limit_allows_24_characters(self):
         self.assertRegex("abcdefghijklmnopqrstuvwx", app._CHANNEL_NAME_RE)
         self.assertNotRegex("abcdefghijklmnopqrstuvwxy", app._CHANNEL_NAME_RE)
+
+    def test_project_username_seeds_settings_when_no_saved_username_exists(self):
+        saved_room_settings = dict(app.room_settings)
+        with tempfile.TemporaryDirectory() as tmp:
+            try:
+                app.room_settings = {
+                    "title": "agentchattr",
+                    "username": "user",
+                    "font": "sans",
+                    "channels": ["general"],
+                    "history_limit": "all",
+                    "contrast": "normal",
+                    "max_agent_hops": 100,
+                    "custom_roles": [],
+                }
+                app.config = {
+                    "project": {"username": "josh"},
+                    "server": {"data_dir": tmp},
+                }
+
+                app._load_settings()
+
+                self.assertEqual(app.room_settings["username"], "josh")
+            finally:
+                app.room_settings = saved_room_settings
+
+    def test_saved_username_wins_over_project_username(self):
+        saved_room_settings = dict(app.room_settings)
+        with tempfile.TemporaryDirectory() as tmp:
+            Path(tmp, "settings.json").write_text(json.dumps({"username": "saved-name"}), "utf-8")
+            try:
+                app.room_settings = {
+                    "title": "agentchattr",
+                    "username": "user",
+                    "font": "sans",
+                    "channels": ["general"],
+                    "history_limit": "all",
+                    "contrast": "normal",
+                    "max_agent_hops": 100,
+                    "custom_roles": [],
+                }
+                app.config = {
+                    "project": {"username": "josh"},
+                    "server": {"data_dir": tmp},
+                }
+
+                app._load_settings()
+
+                self.assertEqual(app.room_settings["username"], "saved-name")
+            finally:
+                app.room_settings = saved_room_settings
 
     def test_agent_ops_payload_flags_configured_registered_and_wrapper_mismatches(self):
         app.config = {

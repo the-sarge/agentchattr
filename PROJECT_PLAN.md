@@ -177,12 +177,12 @@ Objective: make long-running project chats easier to operate.
 
 Deliverables:
 
-- Add message search.
+- Add server-backed message search over project history.
 - Add filters:
   - sender
   - channel
   - pinned/todo/done
-  - jobs/session messages
+  - jobs/session/system messages
 - Add a command palette:
   - switch channel
   - open jobs
@@ -190,6 +190,7 @@ Deliverables:
   - open Agent Operations
   - copy attach command
   - continue loop guard
+- Add keyboard-driven access with `Cmd/Ctrl+K`.
 
 Acceptance criteria:
 

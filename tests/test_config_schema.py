@@ -71,6 +71,7 @@ command = "python"
 [project]
 name = "roadmap"
 title = "Roadmap Room"
+username = "josh"
 accent_color = "#10a37f"
 tmux_prefix = "agentchattr-roadmap"
 repo_url = "https://github.com/the-sarge/agentchattr"
@@ -94,6 +95,7 @@ role = "Builder"
             config = config_loader.load_config(root)
 
         self.assertEqual(config["project"]["title"], "Roadmap Room")
+        self.assertEqual(config["project"]["username"], "josh")
         self.assertEqual(config["project"]["accent_color"], "#10a37f")
         self.assertEqual(config["project"]["repo_url"], "https://github.com/the-sarge/agentchattr")
         self.assertEqual(config["project"]["board_url"], "https://github.com/orgs/the-sarge/projects/1")
@@ -140,6 +142,16 @@ role = "Builder"
         self.assertIn("repo_url", msg)
         self.assertIn("board_url", msg)
         self.assertIn("link_url", msg)
+
+    def test_invalid_project_username_raises(self):
+        bad = {
+            "project": {"tmux_prefix": "agentchattr-bad-user", "username": 123},
+            "server": {"port": 8300},
+            "agents": {"one": {"provider": "claude"}},
+        }
+        with self.assertRaises(config_loader.ConfigError) as ctx:
+            config_loader.validate_config(bad, source="bad-user.toml", require_project=True)
+        self.assertIn("[project].username", str(ctx.exception))
 
     def test_duplicate_known_team_ports_and_prefixes_raise(self):
         with tempfile.TemporaryDirectory() as tmp:

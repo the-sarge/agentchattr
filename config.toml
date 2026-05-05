@@ -1,6 +1,7 @@
 [project]
 name = "agentchattr"
 title = "agentchattr"
+# username = "josh"
 accent_color = "#7c3aed"
 repo_url = "https://github.com/the-sarge/agentchattr"
 board_url = "https://github.com/orgs/the-sarge/projects/1"

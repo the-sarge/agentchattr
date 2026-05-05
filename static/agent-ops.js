@@ -97,9 +97,9 @@
         return [
             renderServices(ops.service_badges || []),
             renderProjectSettings(ops.project || lastProject || {}),
-            renderConfiguredAgents(ops.configured_agents || []),
-            renderRegisteredAgents(ops.registered_agents || []),
             renderWarnings(ops.mismatches || {}),
+            renderRegisteredAgents(ops.registered_agents || []),
+            renderConfiguredAgents(ops.configured_agents || []),
         ].join('');
     }
 
