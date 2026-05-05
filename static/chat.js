@@ -5,7 +5,6 @@
 const SESSION_TOKEN = window.__SESSION_TOKEN__ || "";
 
 let ws = null;
-let pendingAttachments = [];
 let autoScroll = true;
 let reconnectTimer = null;
 let username = 'user';
@@ -26,6 +25,8 @@ let channelUnread = {};  // { channelName: count }
 let agentHats = {};  // { agent_name: svg_string }
 window.customRoles = [];  // saved custom roles from settings
 let colorOverrides = JSON.parse(localStorage.getItem('agentchattr-color-overrides') || '{}');
+let attachmentsModuleMissingNotified = false;
+let attachmentsModuleMissingContexts = new Set();
 let schedulesModuleMissingNotified = false;
 
 // Expose globals that extracted modules (sessions.js, jobs.js) read via window.*
@@ -107,6 +108,29 @@ function reportSchedulesModuleUnavailable(context) {
         schedulesModuleMissingNotified = true;
         showSlashHint('Schedules module failed to load - refresh required');
     }
+}
+
+function reportAttachmentsModuleUnavailable(context) {
+    if (!attachmentsModuleMissingContexts.has(context)) {
+        attachmentsModuleMissingContexts.add(context);
+        console.error(`Attachments module unavailable for ${context}`);
+    }
+    if (!attachmentsModuleMissingNotified) {
+        attachmentsModuleMissingNotified = true;
+        showSlashHint('Attachments module failed to load - refresh required');
+    }
+}
+
+function getAttachmentsMethod(name, context) {
+    if (!window.Attachments) {
+        reportAttachmentsModuleUnavailable(context);
+        return null;
+    }
+    if (typeof window.Attachments[name] !== 'function') {
+        reportAttachmentsModuleUnavailable(`${context}: ${name} missing`);
+        return null;
+    }
+    return window.Attachments[name];
 }
 
 // Settings UI and notification sound preferences live in settings.js.
@@ -192,8 +216,10 @@ function init() {
     fetchRoles();
     connectWebSocket();
     setupInput();
-    setupDragDrop();
-    setupPaste();
+    const setupDragDrop = getAttachmentsMethod('setupDragDrop', 'composer drag/drop setup');
+    if (setupDragDrop) setupDragDrop();
+    const setupPaste = getAttachmentsMethod('setupPaste', 'composer paste setup');
+    if (setupPaste) setupPaste();
     setupScroll();
     window.setupSettingsKeys();
     setupKeyboardShortcuts();
@@ -1874,11 +1900,23 @@ function setupKeyboardShortcuts() {
             if (convertModal && !convertModal.classList.contains('hidden')) { closeConvertJobModal(); return; }
             const deleteJobModal = document.getElementById('delete-job-modal');
             if (deleteJobModal && !deleteJobModal.classList.contains('hidden')) { closeDeleteJobModal(); return; }
-            if (modalOpen) { closeImageModal(); return; }
+            if (modalOpen) {
+                const closeImageModal = getAttachmentsMethod('closeImageModal', 'image modal close');
+                if (closeImageModal) closeImageModal();
+                return;
+            }
             if (replyingTo) { cancelReply(); }
         }
-        if (modalOpen && e.key === 'ArrowLeft') { e.preventDefault(); modalPrev(e); }
-        if (modalOpen && e.key === 'ArrowRight') { e.preventDefault(); modalNext(e); }
+        if (modalOpen && e.key === 'ArrowLeft') {
+            e.preventDefault();
+            const modalPrev = getAttachmentsMethod('modalPrev', 'image modal previous');
+            if (modalPrev) modalPrev(e);
+        }
+        if (modalOpen && e.key === 'ArrowRight') {
+            e.preventDefault();
+            const modalNext = getAttachmentsMethod('modalNext', 'image modal next');
+            if (modalNext) modalNext(e);
+        }
 
     });
 }
@@ -2153,7 +2191,8 @@ function updateSendButton() {
     const input = document.getElementById('input');
     const group = document.querySelector('.send-group');
     if (!input || !group) return;
-    const hasContent = input.value.trim().length > 0 || pendingAttachments.length > 0;
+    const hasPendingAttachments = getAttachmentsMethod('hasPendingAttachments', 'send button state');
+    const hasContent = input.value.trim().length > 0 || (hasPendingAttachments ? hasPendingAttachments() : false);
     group.classList.toggle('inactive', !hasContent);
 }
 window.updateSendButton = updateSendButton;
@@ -2161,8 +2200,10 @@ window.updateSendButton = updateSendButton;
 function sendMessage() {
     const input = document.getElementById('input');
     let text = input.value.trim();
+    const getPendingAttachments = getAttachmentsMethod('getPendingAttachments', 'send message attachments');
+    const attachments = getPendingAttachments ? getPendingAttachments() : [];
 
-    if (!text && pendingAttachments.length === 0) return;
+    if (!text && attachments.length === 0) return;
 
     // Prepend active mention toggles if the message doesn't already mention them
     // Skip for non-broadcast slash commands (e.g. /clear, /continue)
@@ -2200,7 +2241,7 @@ function sendMessage() {
         text: text,
         sender: username,
         channel: activeChannel,
-        attachments: pendingAttachments.map(a => ({
+        attachments: attachments.map(a => ({
             path: a.path,
             name: a.name,
             url: a.url,
@@ -2216,124 +2257,14 @@ function sendMessage() {
 
     input.value = '';
     input.style.height = 'auto';
-    clearAttachments();
+    const clearAttachments = getAttachmentsMethod('clearAttachments', 'sent message cleanup');
+    if (clearAttachments) clearAttachments();
     cancelReply();
     updateSendButton();
     input.focus();
 }
 
-// --- Image paste/drop ---
-
-function setupPaste() {
-    document.addEventListener('paste', async (e) => {
-        const items = e.clipboardData?.items;
-        if (!items) return;
-
-        // Route to job upload if job input is focused
-        const jobInput = document.getElementById('jobs-conv-input-text');
-        const isJobFocused = jobInput && document.activeElement === jobInput;
-
-        for (const item of items) {
-            if (item.type.startsWith('image/')) {
-                e.preventDefault();
-                const file = item.getAsFile();
-                if (isJobFocused) {
-                    await uploadJobImage(file);
-                } else {
-                    await uploadImage(file);
-                }
-            }
-        }
-    });
-}
-
-function setupDragDrop() {
-    const dropzone = document.getElementById('dropzone');
-    let dragCount = 0;
-
-    document.addEventListener('dragenter', (e) => {
-        e.preventDefault();
-        dragCount++;
-        if (e.dataTransfer?.types?.includes('Files')) {
-            dropzone.classList.remove('hidden');
-        }
-    });
-
-    document.addEventListener('dragleave', (e) => {
-        e.preventDefault();
-        dragCount--;
-        if (dragCount <= 0) {
-            dragCount = 0;
-            dropzone.classList.add('hidden');
-        }
-    });
-
-    document.addEventListener('dragover', (e) => {
-        e.preventDefault();
-    });
-
-    document.addEventListener('drop', async (e) => {
-        e.preventDefault();
-        dragCount = 0;
-        dropzone.classList.add('hidden');
-
-        const files = e.dataTransfer?.files;
-        if (!files) return;
-
-        for (const file of files) {
-            if (file.type.startsWith('image/')) {
-                await uploadImage(file);
-            }
-        }
-    });
-}
-
-async function uploadImage(file) {
-    const form = new FormData();
-    form.append('file', file);
-
-    try {
-        const resp = await fetch('/api/upload', { method: 'POST', headers: { 'X-Session-Token': SESSION_TOKEN }, body: form });
-        const data = await resp.json();
-
-        pendingAttachments.push({
-            path: data.path,
-            name: data.name,
-            url: data.url,
-        });
-
-        renderAttachments();
-    } catch (err) {
-        console.error('Upload failed:', err);
-    }
-}
-
-function renderAttachments() {
-    const container = document.getElementById('attachments');
-    container.innerHTML = '';
-
-    pendingAttachments.forEach((att, i) => {
-        const wrap = document.createElement('div');
-        wrap.className = 'attachment-preview';
-        wrap.innerHTML = `
-            <img src="${att.url}" alt="${escapeHtml(att.name)}" onclick="openImageModal('${escapeHtml(att.url)}')" title="Click to preview">
-            <button class="remove-btn" onclick="removeAttachment(${i})">x</button>
-        `;
-        container.appendChild(wrap);
-    });
-    repositionScrollAnchor();
-}
-
-function removeAttachment(index) {
-    pendingAttachments.splice(index, 1);
-    renderAttachments();
-}
-
-function clearAttachments() {
-    pendingAttachments = [];
-    document.getElementById('attachments').innerHTML = '';
-    repositionScrollAnchor();
-}
+// Composer image paste/drop, previews, and image modal live in attachments.js.
 
 // --- Scroll tracking ---
 
@@ -2807,72 +2738,7 @@ function stopVoice() {
     focusComposerInput();
 }
 
-// --- Image modal ---
-
-let modalImages = [];  // all image URLs in chat
-let modalIndex = 0;    // current image index
-
-function getAllChatImages() {
-    const imgs = document.querySelectorAll('.msg-attachments img, .job-msg-attachments img');
-    return [...imgs].map(img => img.src);
-}
-
-function openImageModal(url) {
-    modalImages = getAllChatImages();
-    // Match by endsWith since onclick passes relative URL but img.src is absolute
-    modalIndex = modalImages.findIndex(src => src.endsWith(url) || src === url);
-    if (modalIndex === -1) {
-        // Image not in chat gallery (e.g. composer preview) — show it standalone
-        modalImages = [url];
-        modalIndex = 0;
-    }
-
-    let modal = document.getElementById('image-modal');
-    if (!modal) {
-        modal = document.createElement('div');
-        modal.id = 'image-modal';
-        modal.className = 'hidden';
-        modal.innerHTML = `<button class="modal-nav modal-prev" onclick="modalPrev(event)">&lsaquo;</button><img onclick="event.stopPropagation()"><button class="modal-nav modal-next" onclick="modalNext(event)">&rsaquo;</button><span class="modal-counter"></span>`;
-        modal.addEventListener('click', closeImageModal);
-        document.body.appendChild(modal);
-    }
-    updateModalImage(modal);
-    modal.classList.remove('hidden');
-}
-
-function updateModalImage(modal) {
-    if (!modal) modal = document.getElementById('image-modal');
-    if (!modal || modalImages.length === 0) return;
-    modal.querySelector('img').src = modalImages[modalIndex];
-    const counter = modal.querySelector('.modal-counter');
-    if (counter) {
-        counter.textContent = `${modalIndex + 1} / ${modalImages.length}`;
-    }
-    // Hide arrows at beginning/end, or if only one image
-    const prev = modal.querySelector('.modal-prev');
-    const next = modal.querySelector('.modal-next');
-    if (prev) prev.style.display = modalIndex > 0 ? 'flex' : 'none';
-    if (next) next.style.display = modalIndex < modalImages.length - 1 ? 'flex' : 'none';
-}
-
-function modalPrev(event) {
-    event.stopPropagation();
-    if (modalIndex <= 0) return;
-    modalIndex--;
-    updateModalImage();
-}
-
-function modalNext(event) {
-    event.stopPropagation();
-    if (modalIndex >= modalImages.length - 1) return;
-    modalIndex++;
-    updateModalImage();
-}
-
-function closeImageModal() {
-    const modal = document.getElementById('image-modal');
-    if (modal) modal.classList.add('hidden');
-}
+// Shared image modal helpers are provided by attachments.js.
 
 async function _preserveScroll(fn) {
     const timeline = document.getElementById('timeline');
