@@ -45,6 +45,16 @@ const _expandedGroups = new Set(['open']); // track which collapsible groups are
 
 if (!window._messageRenderers) window._messageRenderers = {};
 
+function escapeAttr(value) {
+    return String(value ?? '').replace(/[&<>"']/g, (ch) => ({
+        '&': '&amp;',
+        '<': '&lt;',
+        '>': '&gt;',
+        '"': '&quot;',
+        "'": '&#39;',
+    }[ch]));
+}
+
 window._messageRenderers['job_created'] = function (el, msg) {
     el.classList.add('system-msg', 'job-breadcrumb');
     const actId = msg.metadata?.job_id;
@@ -1118,7 +1128,7 @@ function appendJobMessage(msg) {
         if (msg.attachments && msg.attachments.length > 0) {
             attHtml = '<div class="job-msg-attachments">';
             for (const att of msg.attachments) {
-                attHtml += `<img src="${window.escapeHtml(att.url)}" alt="${window.escapeHtml(att.name || '')}" onclick="openImageModal('${window.escapeHtml(att.url)}')">`;
+                attHtml += `<img src="${escapeAttr(att.url)}" alt="${escapeAttr(att.name || '')}" data-image-modal-url="${escapeAttr(att.url)}">`;
             }
             attHtml += '</div>';
         }

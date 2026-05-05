@@ -27,6 +27,16 @@
         return div.innerHTML;
     }
 
+    function htmlAttr(value) {
+        return String(value ?? '').replace(/[&<>"']/g, (ch) => ({
+            '&': '&amp;',
+            '<': '&lt;',
+            '>': '&gt;',
+            '"': '&quot;',
+            "'": '&#39;',
+        }[ch]));
+    }
+
     function renderMarkdownBridge(text) {
         const renderMarkdown = getBridgeFn('renderMarkdown', null);
         return renderMarkdown ? renderMarkdown(text) : htmlEscape(text);
@@ -325,7 +335,7 @@
             if (msg.attachments && msg.attachments.length > 0) {
                 attachmentsHtml = '<div class="msg-attachments">';
                 for (const att of msg.attachments) {
-                    attachmentsHtml += `<img src="${htmlEscape(att.url)}" alt="${htmlEscape(att.name)}" onclick="openImageModal('${htmlEscape(att.url)}')">`;
+                    attachmentsHtml += `<img src="${htmlAttr(att.url)}" alt="${htmlAttr(att.name)}" data-image-modal-url="${htmlAttr(att.url)}">`;
                 }
                 attachmentsHtml += '</div>';
             }

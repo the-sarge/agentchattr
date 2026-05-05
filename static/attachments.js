@@ -21,12 +21,14 @@
         return token;
     }
 
-    function htmlEscape(text) {
-        if (typeof window.escapeHtml === 'function') return window.escapeHtml(text);
-        reportMissingBridge('window.escapeHtml');
-        const div = document.createElement('div');
-        div.textContent = text;
-        return div.innerHTML;
+    function htmlAttr(value) {
+        return String(value ?? '').replace(/[&<>"']/g, (ch) => ({
+            '&': '&amp;',
+            '<': '&lt;',
+            '>': '&gt;',
+            '"': '&quot;',
+            "'": '&#39;',
+        }[ch]));
     }
 
     function repositionScrollAnchor() {
@@ -171,7 +173,7 @@
             const wrap = document.createElement('div');
             wrap.className = 'attachment-preview';
             wrap.innerHTML = `
-                <img src="${att.url}" alt="${htmlEscape(att.name)}" onclick="openImageModal('${htmlEscape(att.url)}')" title="Click to preview">
+                <img src="${htmlAttr(att.url)}" alt="${htmlAttr(att.name)}" data-image-modal-url="${htmlAttr(att.url)}" title="Click to preview">
                 <button class="remove-btn" onclick="removeAttachment(${i})">x</button>
             `;
             container.appendChild(wrap);
@@ -199,12 +201,25 @@
 
     function getAllChatImages() {
         const imgs = document.querySelectorAll('.msg-attachments img, .job-msg-attachments img');
-        return [...imgs].map(img => img.src);
+        return [...imgs].map(img => img.dataset.imageModalUrl || img.getAttribute('src') || img.src).filter(Boolean);
+    }
+
+    function handleImageModalClick(event) {
+        const target = event.target;
+        if (!(target instanceof Element)) return;
+        const img = target.closest('img[data-image-modal-url]');
+        if (!img) return;
+        const url = img.dataset.imageModalUrl;
+        if (!url) {
+            console.error('Attachments: image modal URL missing', img);
+            return;
+        }
+        openImageModal(url);
     }
 
     function openImageModal(url) {
         modalImages = getAllChatImages();
-        // Match by endsWith since onclick passes relative URL but img.src is absolute
+        // Match by endsWith for older callers that pass relative URLs while img.src is absolute.
         modalIndex = modalImages.findIndex(src => src.endsWith(url) || src === url);
         if (modalIndex === -1) {
             // Image not in chat gallery (e.g. composer preview); show it standalone.
@@ -296,4 +311,6 @@
     window.setupPaste = setupPaste;
     window.updateModalImage = updateModalImage;
     window.uploadImage = uploadImage;
+
+    document.addEventListener('click', handleImageModalClick);
 })();
