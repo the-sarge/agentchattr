@@ -117,3 +117,79 @@ agentchattr teams from TOML files.
    to distinguish.
 5. Use the `PROJECT_PLAN.md` parallel subagent handoff section to split work
    across workers in the next session.
+
+---
+
+## 2026-05-04 23:51 EDT - Phase 6 Search Navigation
+
+**Branch:** `feature/phase-6-search-nav`
+**Base Commit:** `cad5665`
+**Commits:** `9e5b532`
+
+### Summary
+
+Finished the remaining Phase 6 search and navigation work on top of the
+project runner and Agent Operations baseline. The main outcome is a
+server-backed command palette that searches project message history instead of
+only the currently loaded browser slice.
+
+### Decisions
+
+- Keep plain search scoped to message body text so channel names and result
+  descriptions do not create noisy false positives.
+- Keep sender search explicit with `@sender`, while leaving normal username
+  matching out of plain search for now.
+- Prefer channel switch commands ahead of message matches when the query
+  matches a channel name.
+- Add `[project].username` directly under `title` in team/project TOML as a
+  startup seed for fresh projects, with saved UI settings taking precedence.
+- Keep the Agent Operations payload unchanged and reorder only the rendered
+  panel sections.
+
+### Changes
+
+- Added `GET /api/search` and `MessageStore.search()` for history-backed
+  message search.
+- Added server-side filters for sender, channel, pinned, todo, done, jobs,
+  sessions, and system messages.
+- Updated `static/search-nav.js` to use the search API, debounce queries,
+  show status text, highlight matched snippets, and support Home/End/Page
+  keyboard navigation.
+- Updated search filters to use backend facets so sender/channel dropdowns are
+  not limited to the currently visible result set.
+- Reordered Agent Operations sections to show Warnings, Running Agents, then
+  Configured Agents.
+- Added `[project].username` validation, settings seeding, examples, and
+  README documentation.
+- Updated `PROJECT_PLAN.md` and README language to reflect server-backed
+  project-history search.
+- Added focused tests for search semantics, project username seeding, and
+  config validation.
+
+### Verification
+
+- Ran `.venv/bin/python -m pytest -q`; latest run passed `66` tests.
+- Ran `node --check static/search-nav.js`.
+- Ran `node --check static/agent-ops.js`.
+- Ran `.venv/bin/python -m py_compile app.py config_loader.py`.
+- Ran `git diff --cached --check` before committing `9e5b532`.
+- Smoke-started a separate local server on `127.0.0.1:8310` with alternate MCP
+  ports to avoid disturbing the existing `8300` project server.
+
+### Open Questions
+
+- Search can find older messages from the full store, but jumping to a result
+  still depends on whether that message is present in the current browser DOM.
+  A future `/api/messages/window` endpoint could load a surrounding message
+  window before scrolling.
+- Broader Phase 5 frontend extraction remains open; this session kept new
+  search and operations behavior outside the `chat.js` monolith where possible.
+
+### Next Steps
+
+1. Open a PR for `feature/phase-6-search-nav` against `the-sarge/agentchattr`.
+2. Browser-test long-history search with realistic project data and channel
+   switches.
+3. Decide whether old-result navigation needs a message-window loader before
+   considering Phase 6 fully polished.
+4. Continue Phase 5 extraction in smaller frontend-only follow-up branches.
