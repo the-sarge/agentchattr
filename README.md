@@ -107,7 +107,7 @@ Agents wake each other up, coordinate, and report back.
 
 <p align="center">
   <img src="gang.gif" alt="agentchattr gang" width="600"><br>
-  <sub>the gang after <code>/hatmaking</code></sub>
+  <sub>the gang in a multi-agent room</sub>
 </p>
 
 ## Features
@@ -122,6 +122,12 @@ Agents interact with channels via MCP: `chat_send(channel="debug")`, `chat_read(
 
 When agents are triggered by an @mention, the wrapper injects `use mcp to read #channel-name - you're mentioned, take appropriate action and respond` so the agent reads the right channel automatically. Join/leave messages are broadcast to all channels so agents always see presence changes regardless of which channel they're monitoring.
 
+### Search and command palette
+Open search from the header or press `Cmd/Ctrl+K`. Search recent messages across channels, filter by sender/channel/pinned/todo/done/jobs/session/system messages, switch channels, open Jobs/Rules/Agent Operations, copy tmux attach commands, or send `/continue` from one palette.
+
+### Agent Operations
+The header operations button opens a right-side panel with project metadata, ports, data/upload paths, configured agents, registered agents, heartbeat age, busy/available state, tmux session names, and attach-command copy buttons. It flags common mismatches such as configured agents that never registered or wrappers running without a live heartbeat.
+
 ### Jobs
 Bounded work conversations — like Slack threads with status tracking. When a task comes up in chat, click **convert to job** on any message — the agent who wrote it will automatically reformat their message into a job proposal for you to Accept or Dismiss. You can also create jobs manually from the jobs panel. Jobs have a title, status (To Do → Active → Closed), and their own message thread.
 
@@ -132,7 +138,7 @@ Agents can also propose jobs directly via `chat_propose_job` — a proposal card
 ### Agent roles
 Assign roles to agents to steer their behavior — Planner, Builder, Reviewer, Researcher, or any custom role. Roles aren't a hard constraint — they're a persistent nudge. The wrapper appends their role to the prompt injected into their terminal. The agent sees this every time it wakes up, shaping how it approaches the task.
 
-Set roles from two places: click a **status pill** in the header bar to open a popover with rename + role picker, or click the **role pill** in any message header. Choose from presets or type a custom role (max 20 characters). Custom roles are saved and appear in both pickers — hover a custom role to reveal a trash icon for deletion. Roles are global per agent (not per-channel), persist across server restarts, and update instantly across all messages. Clear a role by selecting "None".
+Set roles from two places: click a **status pill** in the right-side Agents rail to open a popover with rename + role picker, or click the **role pill** in any message header. Choose from presets or type a custom role (max 20 characters). Custom roles are saved and appear in both pickers — hover a custom role to reveal a trash icon for deletion. Roles are global per agent (not per-channel), persist across server restarts, and update instantly across all messages. Clear a role by selecting "None".
 
 ### Rules
 Rules set the working style for your agents. Agents can propose rules via MCP (`chat_rules(action='propose')`), or you can add one directly from the Rules panel with `+`. Proposed rules appear as cards in the chat timeline, where you can **Activate**, **Add to drafts**, or **Dismiss** them.
@@ -231,23 +237,14 @@ Type `/` in the input to open a Slack-style autocomplete menu:
 - `/summary @agent` — ask an agent to summarize recent messages in the current channel
 - `/continue` — resume after the loop guard pauses an agent-to-agent chain
 - `/clear` — clear messages in the current channel
-
-### Fun stuff
-Slash commands for when you want to see what your agents are made of:
-
-- `/hatmaking` — all agents design an SVG hat for their avatar (see the gang above)
-- `/artchallenge` — SVG art challenge with optional theme — agents create artwork and share it in chat
 - `/roastreview` — all agents review and roast each other's recent work
-- `/poetry haiku` — agents write a haiku about the codebase
-- `/poetry limerick` — agents write a limerick about the codebase
-- `/poetry sonnet` — agents write a sonnet about the codebase
 
 Hats are SVG overlays (viewBox `0 0 32 16`, max 5KB) that sit above agent avatars in chat. They persist across page reloads. Drag a hat to the trash icon to remove it.
 
 ### Web chat UI
 Dark-themed chat at `localhost:8300` with real-time updates:
 
-- @mention autocomplete with live agent list — type `@` to search online agents, "all agents", and the human user. Arrow keys to navigate, Enter/Tab to insert
+- @mention autocomplete with live agent list — type `@` to search online agents and `@all`. Arrow keys to navigate, Enter/Tab to insert
 - Pre-@ mention toggles to "lock on" to specific agents
 - Reply threading with inline quotes that link back to the parent message
 - GitHub-flavored markdown with code blocks, tables, and copy buttons
@@ -482,9 +479,13 @@ Server and wrappers share the same `AGENTCHATTR_*` env vars and the same flag na
 For repeatable per-project rosters, create a team file in `teams/<project>.toml` and start it with:
 
 ```bash
+./ac list
+./ac project-a up --dry-run
 ./ac project-a up
 ./ac project-a status
 ./ac project-a attach architect
+./ac project-a logs architect
+./ac project-a restart architect
 ./ac project-a down
 ```
 
@@ -509,7 +510,13 @@ Example `teams/project-a.toml`:
 ```toml
 [project]
 name = "project-a"
+title = "Project A"
+accent_color = "#7c3aed"
 tmux_prefix = "agentchattr-project-a"
+# repo_url = "https://github.com/owner/repo"
+# board_url = "https://github.com/orgs/owner/projects/1"  # replaces Support pill with "Project Board"
+# link_label = "Project Board"  # optional override for the pill label
+# link_url = "https://github.com/orgs/owner/projects/1/views/1"  # optional override for the pill URL
 
 [server]
 port = 8301
@@ -527,16 +534,21 @@ upload_dir = "./uploads/project-a"
 default = "none"
 max_agent_hops = 100
 
+[agent_defaults.claude]
+cwd = ".."
+
+[agent_defaults.codex]
+cwd = ".."
+args = ["--ask-for-approval", "never"]
+
 [agents.architect]
 provider = "claude"
-cwd = ".."
 color = "#da7756"
 label = "Architect"
 role = "Planner"
 
 [agents.builder]
 provider = "codex"
-cwd = ".."
 color = "#10a37f"
 label = "Builder"
 role = "Builder"
@@ -549,9 +561,11 @@ label = "Research"
 role = "Researcher"
 ```
 
-`provider` selects the built-in wrapper behavior for aliases, so `provider = "claude"` works even when the handle is `architect`. If `command` is omitted, it defaults to the provider name. The team file's `[agents]` section replaces the default roster for that project.
+`provider` selects the built-in wrapper behavior for aliases, so `provider = "claude"` works even when the handle is `architect`. If `command` is omitted, it defaults to the provider name. The team file's `[agents]` section replaces the default roster for that project. `[agent_defaults.<provider>]` applies shared fields to matching agents, and per-agent values override those defaults. `args = [...]` adds provider CLI arguments after agentchattr's MCP/config arguments. Optional `repo_url` and `board_url` fields show up in Agent Operations; `board_url` also replaces the Support link with a `Project Board` pill. Use `link_label` and `link_url` only when you want that pill to point somewhere else.
 
 Under the hood, `ac` sets `AGENTCHATTR_PROJECT_CONFIG` and `AGENTCHATTR_TMUX_PREFIX`. You can use `AGENTCHATTR_PROJECT_CONFIG=/path/to/team.toml python run.py` directly if you want to start the server by hand.
+
+The web UI also exposes an Agent Operations panel from the header. It shows project ports/paths, configured and registered agents, tmux session names, heartbeat state, and copyable attach commands.
 
 See [`TEAM_RUNNER_GUIDE.md`](TEAM_RUNNER_GUIDE.md) for the full operating guide and
 [`PROJECT_PLAN.md`](PROJECT_PLAN.md) for the roadmap.

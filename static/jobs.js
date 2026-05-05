@@ -278,7 +278,7 @@ function resolveJobDefaultRecipient(job, messages = []) {
     // For active threads with history, infer from last non-self agent sender.
     for (let i = messages.length - 1; i >= 0; i--) {
         const sender = String(messages[i]?.sender || '');
-        if (!sender || sender.toLowerCase() === window.username.toLowerCase()) continue;
+        if (!sender || window.isSelfSender?.(sender) || sender.toLowerCase() === window.username.toLowerCase()) continue;
         const normalized = _normalizeJobRecipient(sender, opts);
         if (normalized) return normalized;
     }
@@ -363,8 +363,10 @@ function toggleJobsPanel() {
     window._preserveScroll(() => {
         const panel = document.getElementById('jobs-panel');
         panel.classList.toggle('hidden');
-        document.getElementById('jobs-toggle').classList.toggle('active', !panel.classList.contains('hidden'));
-        if (!panel.classList.contains('hidden')) {
+        const open = !panel.classList.contains('hidden');
+        document.body.classList.toggle('jobs-panel-open', open);
+        document.getElementById('jobs-toggle').classList.toggle('active', open);
+        if (open) {
             // Return to list view if we were in conversation view
             showJobsListView();
             renderJobsList();
@@ -1400,7 +1402,7 @@ function handleJobEvent(action, data) {
             activeJobId === data.job_id
         );
         const sender = (data.message && data.message.sender) ? String(data.message.sender) : '';
-        const isSelfMessage = sender.toLowerCase() === window.username.toLowerCase();
+        const isSelfMessage = window.isSelfSender?.(sender) || sender.toLowerCase() === window.username.toLowerCase();
         const msgType = data.message.type || 'chat';
         if (!isSelfMessage) {
             const normalized = _normalizeJobRecipient(sender);

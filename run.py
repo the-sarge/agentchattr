@@ -44,7 +44,7 @@ def main():
     # wrappers use identical extraction logic.
     _parse_args()
 
-    from config_loader import apply_cli_overrides, load_config
+    from config_loader import ConfigError, apply_cli_overrides, load_config
     apply_cli_overrides()
 
     config_path = ROOT / "config.toml"
@@ -52,7 +52,11 @@ def main():
         print(f"Error: {config_path} not found")
         sys.exit(1)
 
-    config = load_config(ROOT)
+    try:
+        config = load_config(ROOT)
+    except ConfigError as exc:
+        print(f"Config error: {exc}")
+        sys.exit(1)
 
     # --- Security: generate a random session token (in-memory only) ---
     session_token = secrets.token_hex(32)

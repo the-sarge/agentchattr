@@ -39,14 +39,18 @@ def _auth_headers(token: str, *, include_json: bool = False) -> dict[str, str]:
 
 
 def main():
-    from config_loader import apply_cli_overrides, load_config
+    from config_loader import ConfigError, apply_cli_overrides, load_config
     from wrapper import _register_instance
 
     # Apply AGENTCHATTR_* overrides (from CLI flags or env) BEFORE loading
     # config so the API wrapper connects to the same data_dir/ports as a
     # server launched with matching flags.
     apply_cli_overrides()
-    config = load_config(ROOT)
+    try:
+        config = load_config(ROOT)
+    except ConfigError as exc:
+        print(f"  Config error: {exc}")
+        sys.exit(1)
     agent_names = list(config.get("agents", {}).keys())
     api_agents = [n for n in agent_names if config["agents"][n].get("type") == "api"]
 

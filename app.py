@@ -2,9 +2,14 @@
 
 import asyncio
 import json
+import os
 import re as _re
+import shlex
+import shutil
+import subprocess
 import sys
 import threading
+import time
 import uuid
 import logging
 from pathlib import Path
@@ -24,6 +29,7 @@ from agents import AgentTrigger
 from registry import RuntimeRegistry
 from session_store import SessionStore, validate_session_template
 from session_engine import SessionEngine
+from config_loader import PROJECT_CONFIG_ENV, TMUX_PREFIX_ENV
 
 log = logging.getLogger(__name__)
 
@@ -54,11 +60,12 @@ room_settings: dict = {
     "channels": ["general"],
     "history_limit": "all",
     "contrast": "normal",
+    "max_agent_hops": 100,
     "custom_roles": [],
 }
 
 # Channel validation
-_CHANNEL_NAME_RE = _re.compile(r'^[a-z0-9][a-z0-9\-]{0,19}$')
+_CHANNEL_NAME_RE = _re.compile(r'^[a-z0-9][a-z0-9\-]{0,23}$')
 MAX_CHANNELS = 8
 
 # Agent hats (persisted to data/hats.json)
@@ -133,11 +140,15 @@ def _load_settings():
             room_settings.update(saved)
         except Exception:
             pass
+    if room_settings.get("settings_version") is None and room_settings.get("max_agent_hops") == 4:
+        room_settings["max_agent_hops"] = 100
+    room_settings["settings_version"] = 2
     # Ensure "general" always exists and is first
     if "channels" not in room_settings or not room_settings["channels"]:
         room_settings["channels"] = ["general"]
     elif "general" not in room_settings["channels"]:
         room_settings["channels"].insert(0, "general")
+    room_settings.setdefault("max_agent_hops", 100)
 
 
 def _save_settings():
@@ -271,7 +282,7 @@ def configure(cfg: dict, session_token: str = ""):
     schedules = ScheduleStore(str(Path(data_dir) / "schedules.json"))
     schedules.on_change(_on_schedule_change)
 
-    max_hops = cfg.get("routing", {}).get("max_agent_hops", 4)
+    max_hops = cfg.get("routing", {}).get("max_agent_hops", 100)
 
     # Registry: single source of truth for all live agent state
     registry = RuntimeRegistry(data_dir=data_dir)
@@ -650,9 +661,9 @@ async def _handle_new_message(msg: dict):
     global _last_active_channel
     if msg_type not in ("system", "leave", "join"):
         _last_active_channel = channel
-    # Strip @mentions to find the slash command (e.g. "@claude @codex /hatmaking")
+    # Strip @mentions to find the slash command (e.g. "@claude @codex /roastreview")
     stripped = _re.sub(r"@[\w-]+\s*", "", text).strip().lower()
-    _broadcast_cmds = ("/hatmaking", "/artchallenge", "/roastreview", "/poetry")
+    _broadcast_cmds = ("/roastreview",)
     cmd_word = stripped.split()[0] if stripped else ""
     is_broadcast_cmd = cmd_word in _broadcast_cmds
     known_agents = set(registry.get_all_names()) if registry else set()
@@ -696,56 +707,6 @@ async def _handle_new_message(msg: dict):
         agent_names = registry.get_all_names() if registry else list(config.get("agents", {}).keys())
         mentions = " ".join(f"@{a}" for a in agent_names)
         store.add(sender, f"{mentions} Time for a roast review! Inspect each other's work and constructively roast it.", channel=channel)
-        return
-
-    if stripped.startswith("/artchallenge"):
-        parts = stripped.split(None, 1)
-        theme = parts[1] if len(parts) > 1 else "anything you like"
-        agent_names = registry.get_all_names() if registry else list(config.get("agents", {}).keys())
-        mentions = " ".join(f"@{a}" for a in agent_names)
-        store.add(
-            sender,
-            f"{mentions} Art challenge! Create an SVG artwork with the theme: **{theme}**. "
-            "Write your SVG code to a .svg file, then attach it using chat_send(image_path=...). "
-            "Make it creative, keep it under 5KB. Let's see what you've got!",
-            channel=channel,
-        )
-        return
-
-    if stripped == "/hatmaking":
-        agent_names = registry.get_all_names() if registry else list(config.get("agents", {}).keys())
-        mentions = " ".join(f"@{a}" for a in agent_names)
-        all_instances = registry.get_all() if registry else {}
-        agents_cfg = config.get("agents", {})
-        color_parts = ", ".join(
-            f"{a}={all_instances[a]['color']}" if a in all_instances
-            else f"{a}={agents_cfg.get(a, {}).get('color', '#888')}"
-            for a in agent_names
-        )
-        store.add(
-            sender,
-            f"{mentions} Hat making time! Design a new hat for your avatar using SVG. "
-            "Use viewBox=\"0 0 32 16\" so it fits on top of a 32px avatar circle. "
-            f"Background is dark (#0f0f17). Avatar colors: {color_parts}. Design for good contrast! "
-            "Call chat_set_hat(sender=your_name, svg='<svg ...>...</svg>') to wear it. "
-            "Be creative — top hats, party hats, crowns, propeller beanies, whatever you want!",
-            channel=channel,
-        )
-        return
-
-    if stripped.startswith("/poetry"):
-        parts = stripped.split(None, 1)
-        form = parts[1] if len(parts) > 1 else "haiku"
-        if form not in ("haiku", "limerick", "sonnet"):
-            form = "haiku"
-        agent_names = registry.get_all_names() if registry else list(config.get("agents", {}).keys())
-        mentions = " ".join(f"@{a}" for a in agent_names)
-        prompts = {
-            "haiku": "Write a haiku about the current state of this codebase.",
-            "limerick": "Write a limerick about the current state of this codebase.",
-            "sonnet": "Write a sonnet about the current state of this codebase.",
-        }
-        store.add(sender, f"{mentions} {prompts[form]}", channel=channel)
         return
 
     # Detect session draft blocks from agents only.
@@ -1008,6 +969,206 @@ def _on_registry_change():
         asyncio.run_coroutine_threadsafe(broadcast_status(), _event_loop)
 
 
+def _slug(value: str) -> str:
+    value = _re.sub(r"[^a-zA-Z0-9_.-]+", "-", value.strip()).strip("-")
+    return value or "default"
+
+
+def _runtime_path(raw: str) -> str:
+    path = Path(str(raw)).expanduser()
+    if not path.is_absolute():
+        path = (Path(__file__).parent / path).resolve()
+    return str(path)
+
+
+def _project_name_from_config() -> str:
+    project = config.get("project", {}) if isinstance(config.get("project", {}), dict) else {}
+    return str(project.get("name") or project.get("title") or "agentchattr")
+
+
+def _tmux_prefix_from_config() -> str:
+    env_prefix = os.environ.get(TMUX_PREFIX_ENV, "").strip()
+    if env_prefix:
+        return env_prefix
+    project = config.get("project", {}) if isinstance(config.get("project", {}), dict) else {}
+    explicit = str(project.get("tmux_prefix", "")).strip()
+    if explicit:
+        return explicit
+    return f"agentchattr-{_slug(_project_name_from_config())}"
+
+
+def _project_payload() -> dict:
+    project = config.get("project", {}) if isinstance(config.get("project", {}), dict) else {}
+    server = config.get("server", {}) if isinstance(config.get("server", {}), dict) else {}
+    mcp = config.get("mcp", {}) if isinstance(config.get("mcp", {}), dict) else {}
+    images = config.get("images", {}) if isinstance(config.get("images", {}), dict) else {}
+    team_file = config.get("_meta", {}).get("project_config_path") or os.environ.get(PROJECT_CONFIG_ENV) or None
+    name = _project_name_from_config()
+    title = str(project.get("title") or name)
+    theme = config.get("theme", {}) if isinstance(config.get("theme", {}), dict) else {}
+    return {
+        "name": name,
+        "title": title,
+        "accent_color": project.get("accent_color") or theme.get("accent_color") or "#7c3aed",
+        "repo_url": project.get("repo_url") or project.get("github_url") or "",
+        "board_url": project.get("board_url") or project.get("github_project_url") or "",
+        "link_label": project.get("link_label") or "",
+        "link_url": project.get("link_url") or "",
+        "team_file": str(team_file) if team_file else None,
+        "tmux_prefix": _tmux_prefix_from_config(),
+        "server": {
+            "host": server.get("host", "127.0.0.1"),
+            "port": int(server.get("port", 8300)),
+        },
+        "mcp": {
+            "http_port": int(mcp.get("http_port", 8200)),
+            "sse_port": int(mcp.get("sse_port", 8201)),
+        },
+        "data_dir": _runtime_path(server.get("data_dir", "./data")),
+        "upload_dir": _runtime_path(images.get("upload_dir", "./uploads")),
+    }
+
+
+def _tmux_sessions() -> set[str]:
+    if not shutil.which("tmux"):
+        return set()
+    result = subprocess.run(
+        ["tmux", "list-sessions", "-F", "#{session_name}"],
+        capture_output=True,
+        text=True,
+    )
+    if result.returncode != 0:
+        return set()
+    return {line.strip() for line in result.stdout.splitlines() if line.strip()}
+
+
+def _agent_ops_payload() -> dict:
+    import mcp_bridge
+
+    now = time.time()
+    project = _project_payload()
+    prefix = project["tmux_prefix"]
+    sessions = _tmux_sessions()
+    configured_cfg = config.get("agents", {}) if isinstance(config.get("agents", {}), dict) else {}
+    registered = registry.get_all() if registry else {}
+    status = agents.get_status() if agents else {}
+    registered_by_base: dict[str, list[str]] = {}
+    for name, info in registered.items():
+        registered_by_base.setdefault(info.get("base", name), []).append(name)
+
+    with mcp_bridge._presence_lock:
+        presence = dict(mcp_bridge._presence)
+        activity = dict(mcp_bridge._activity)
+
+    configured = []
+    for name, cfg in configured_cfg.items():
+        live_session = f"{prefix}-{name}"
+        wrapper_session = f"{prefix}-wrap-{_slug(name)}"
+        registered_names = registered_by_base.get(name, [])
+        heartbeat_ages = [
+            now - presence[n]
+            for n in registered_names
+            if n in presence
+        ]
+        heartbeat_age = min(heartbeat_ages) if heartbeat_ages else None
+        online = any(status.get(n, {}).get("available") for n in registered_names)
+        busy = any(status.get(n, {}).get("busy") for n in registered_names)
+        wrapper_running = wrapper_session in sessions
+        configured.append({
+            "name": name,
+            "label": cfg.get("label", name),
+            "provider": cfg.get("provider") or ("api" if cfg.get("type") == "api" else cfg.get("command", "")),
+            "command": cfg.get("command", ""),
+            "type": cfg.get("type", "cli"),
+            "role": cfg.get("role", ""),
+            "color": cfg.get("color", "#888"),
+            "registered_names": registered_names,
+            "online": bool(online),
+            "busy": bool(busy),
+            "heartbeat_age": heartbeat_age,
+            "tmux": {
+                "live_session": live_session,
+                "wrapper_session": wrapper_session,
+                "live_running": live_session in sessions,
+                "wrapper_running": wrapper_running,
+            },
+            "attach": {
+                "live": f"tmux attach -t {shlex.quote(live_session)}",
+                "wrapper": f"tmux attach -t {shlex.quote(wrapper_session)}",
+            },
+            "mismatches": {
+                "configured_not_registered": not registered_names,
+                "wrapper_running_without_live_heartbeat": wrapper_running and not online,
+            },
+        })
+
+    registered_rows = []
+    for name, info in registered.items():
+        base = info.get("base", name)
+        live_session = f"{prefix}-{name}"
+        state = status.get(name, {})
+        heartbeat_age = now - presence[name] if name in presence else None
+        registered_rows.append({
+            "name": name,
+            "base": base,
+            "label": info.get("label", state.get("label", name)),
+            "role": state.get("role", ""),
+            "color": info.get("color", state.get("color", "#888")),
+            "state": info.get("state", ""),
+            "online": bool(state.get("available")),
+            "busy": bool(state.get("busy") or activity.get(name)),
+            "heartbeat_age": heartbeat_age,
+            "tmux": {
+                "live_session": live_session,
+                "live_running": live_session in sessions,
+            },
+            "attach": {
+                "live": f"tmux attach -t {shlex.quote(live_session)}",
+            },
+            "mismatches": {
+                "registered_not_configured": base not in configured_cfg,
+            },
+        })
+
+    service_badges = [
+        {
+            "name": "server",
+            "label": "Server",
+            "status": "running",
+            "detail": f"{project['server']['host']}:{project['server']['port']}",
+            "tmux_session": f"{prefix}-server",
+            "tmux_running": f"{prefix}-server" in sessions,
+        },
+        {
+            "name": "mcp-http",
+            "label": "MCP HTTP",
+            "status": "configured",
+            "detail": str(project["mcp"]["http_port"]),
+        },
+        {
+            "name": "mcp-sse",
+            "label": "MCP SSE",
+            "status": "configured",
+            "detail": str(project["mcp"]["sse_port"]),
+        },
+    ]
+    return {
+        "project": project,
+        "service_badges": service_badges,
+        "configured_agents": configured,
+        "registered_agents": registered_rows,
+        "tmux_sessions": sorted(s for s in sessions if s == prefix or s.startswith(prefix + "-")),
+        "mismatches": {
+            "configured_not_registered": [row["name"] for row in configured if row["mismatches"]["configured_not_registered"]],
+            "registered_not_configured": [row["name"] for row in registered_rows if row["mismatches"]["registered_not_configured"]],
+            "wrapper_running_without_live_heartbeat": [
+                row["name"] for row in configured
+                if row["mismatches"]["wrapper_running_without_live_heartbeat"]
+            ],
+        },
+    }
+
+
 # --- WebSocket ---
 
 @app.websocket("/ws")
@@ -1110,7 +1271,7 @@ async def websocket_endpoint(websocket: WebSocket):
                         continue
                     # Broadcast slash commands — expand without storing the raw command.
                     # _handle_new_message will store the expanded version.
-                    if cmd in ("/hatmaking", "/artchallenge", "/roastreview", "/poetry"):
+                    if cmd == "/roastreview":
                         await _handle_new_message({"sender": sender, "text": text, "channel": channel})
                         continue
 
@@ -1537,6 +1698,16 @@ async def get_status():
     status = agents.get_status()
     status["paused"] = any(router.is_paused(ch) for ch in room_settings.get("channels", ["general"]))
     return status
+
+
+@app.get("/api/project")
+async def get_project():
+    return _project_payload()
+
+
+@app.get("/api/agent-ops")
+async def get_agent_ops():
+    return _agent_ops_payload()
 
 
 @app.get("/api/settings")

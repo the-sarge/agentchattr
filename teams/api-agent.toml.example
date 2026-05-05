@@ -1,0 +1,46 @@
+[project]
+name = "api-agent"
+title = "API Agent Room"
+accent_color = "#2fe898"
+tmux_prefix = "agentchattr-api-agent"
+# repo_url = "https://github.com/owner/repo"
+# board_url = "https://github.com/orgs/owner/projects/1"  # replaces Support pill with "Project Board"
+# link_label = "Project Board"  # optional override for the pill label
+# link_url = "https://github.com/orgs/owner/projects/1/views/1"  # optional override for the pill URL
+
+[server]
+port = 8330
+host = "127.0.0.1"
+data_dir = "./data/api-agent"
+
+[mcp]
+http_port = 8240
+sse_port = 8241
+
+[images]
+upload_dir = "./uploads/api-agent"
+
+[routing]
+default = "none"
+max_agent_hops = 100
+
+[agent_defaults.api]
+context_messages = 20
+temperature = 1.0
+
+[agents.local-qwen]
+type = "api"
+base_url = "http://localhost:8189/v1"
+model = "qwen3-4b"
+label = "Local Qwen"
+role = "Builder"
+color = "#8b5cf6"
+
+[agents.minimax]
+type = "api"
+base_url = "https://api.minimax.io/v1"
+model = "MiniMax-M2.7"
+api_key_env = "MINIMAX_API_KEY"
+label = "MiniMax"
+role = "Reviewer"
+color = "#2fe898"

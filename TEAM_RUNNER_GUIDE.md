@@ -26,31 +26,33 @@ session.
 Create a project team file:
 
 ```bash
-cp teams/project-a.toml.example teams/project-a.toml
+cp teams/two-agent.toml.example teams/two-agent.toml
 ```
 
 Edit ports, paths, and agents as needed, then start it:
 
 ```bash
-./ac project-a up
+./ac list
+./ac two-agent up --dry-run
+./ac two-agent up
 ```
 
 Check status:
 
 ```bash
-./ac project-a status
+./ac two-agent status
 ```
 
 Attach to an agent:
 
 ```bash
-./ac project-a attach claude-planner
+./ac two-agent attach architect
 ```
 
 Stop the project:
 
 ```bash
-./ac project-a down
+./ac two-agent down
 ```
 
 ## Team File Location
@@ -74,7 +76,13 @@ You can also pass an explicit file:
 ```toml
 [project]
 name = "project-a"
+title = "Project A"
+accent_color = "#7c3aed"
 tmux_prefix = "agentchattr-project-a"
+# repo_url = "https://github.com/owner/repo"
+# board_url = "https://github.com/orgs/owner/projects/1"  # replaces Support pill with "Project Board"
+# link_label = "Project Board"  # optional override for the pill label
+# link_url = "https://github.com/orgs/owner/projects/1/views/1"  # optional override for the pill URL
 
 [server]
 port = 8301
@@ -92,9 +100,11 @@ upload_dir = "./uploads/project-a"
 default = "none"
 max_agent_hops = 100
 
+[agent_defaults.claude]
+cwd = ".."
+
 [agents.claude-planner]
 provider = "claude"
-cwd = ".."
 color = "#da7756"
 label = "Claude Planner"
 role = "Planner"
@@ -114,6 +124,12 @@ label = "Gemini Research"
 role = "Researcher"
 ```
 
+Additional examples are available under `teams/`:
+
+- `teams/two-agent.toml.example`
+- `teams/large-roster.toml.example`
+- `teams/api-agent.toml.example`
+
 ## Agent Fields
 
 Each `[agents.<name>]` entry defines a handle. The handle is what you mention
@@ -128,6 +144,8 @@ Common fields:
 - `color`: status pill and mention color
 - `label`: display label in the UI
 - `role`: role text injected into the agent when it is triggered
+- `args`: extra provider CLI arguments appended after agentchattr-owned MCP
+  arguments and before ad hoc wrapper pass-through arguments
 
 For normal aliases, prefer `provider` and omit `command`:
 
@@ -143,6 +161,20 @@ Use `command` when testing or when the executable is not on `PATH`:
 provider = "claude"
 command = "/opt/bin/claude"
 ```
+
+Shared defaults reduce repeated fields:
+
+```toml
+[agent_defaults.codex]
+cwd = ".."
+args = ["--ask-for-approval", "never"]
+
+[agents.codex-builder]
+provider = "codex"
+label = "Codex Builder"
+```
+
+Per-agent values override matching `[agent_defaults.<provider>]` values.
 
 ## Multiple Projects
 
@@ -219,27 +251,34 @@ Ctrl+B, then D
 
 ## Restarting One Agent
 
-There is not yet a dedicated `./ac project-a restart <agent>` command. For now:
-
-1. Kill the live agent tmux session.
-2. Wait a few seconds for its wrapper to exit.
-3. Run `./ac project-a up` again. Existing sessions are left alone; stopped
-   wrappers are started again.
-
-Example:
+Restart one wrapper/live agent pair without touching the server or other
+agents:
 
 ```bash
-tmux kill-session -t agentchattr-project-a-claude-planner
-sleep 5
-./ac project-a up
+./ac project-a restart claude-planner
 ```
 
-If the wrapper session is still present and stuck, kill it too:
+This kills:
+
+```text
+agentchattr-project-a-claude-planner
+agentchattr-project-a-wrap-claude-planner
+```
+
+Then it starts the wrapper again. The wrapper creates the live agent tmux
+session.
+
+## Logs
+
+Capture recent tmux pane output without attaching:
 
 ```bash
-tmux kill-session -t agentchattr-project-a-wrap-claude-planner
-./ac project-a up
+./ac project-a logs server
+./ac project-a logs claude-planner --lines 300
+./ac project-a logs wrapper:claude-planner
 ```
+
+The default is `--lines 200`. A raw tmux session name also works as the target.
 
 ## Stopping A Project
 
@@ -282,13 +321,13 @@ tmux list-sessions | grep agentchattr-project-a
 View server output:
 
 ```bash
-./ac project-a attach server
+./ac project-a logs server
 ```
 
 View wrapper output:
 
 ```bash
-./ac project-a attach wrapper:claude-planner
+./ac project-a logs wrapper:claude-planner
 ```
 
 View live agent:
