@@ -213,9 +213,7 @@
 
         // Group cards by row
         var topCards = [], middleCards = [], bottomCards = [];
-        var cardMap = {};
         cardDefs.forEach(function(def) {
-            cardMap[def.id] = def;
             if (def.row === 'top') topCards.push(def);
             else if (def.row === 'middle') middleCards.push(def);
             else if (def.row === 'bottom') bottomCards.push(def);
@@ -531,45 +529,10 @@
         openHelp,
         closeHelp,
         initHelpTour,
-        _helpCardDefs,
-        _openHelpAnchored,
-        _positionHelpRows,
-        _drawHelpArrows,
-        _openHelpStacked,
-        _helpResizeHandler,
-        _helpKeyHandler,
     };
-
-    Object.defineProperty(window, '_helpOpen', {
-        configurable: true,
-        get() { return _helpOpen; },
-        set(value) { _helpOpen = !!value; },
-    });
-    Object.defineProperty(window, '_helpResizeTimer', {
-        configurable: true,
-        get() { return _helpResizeTimer; },
-        set(value) { _helpResizeTimer = value; },
-    });
-    Object.defineProperty(window, '_helpCardEls', {
-        configurable: true,
-        get() { return _helpCardEls; },
-        set(value) { _helpCardEls = Array.isArray(value) ? value : []; },
-    });
-    Object.defineProperty(window, '_helpMode', {
-        configurable: true,
-        get() { return _helpMode; },
-        set(value) { _helpMode = value; },
-    });
 
     window.toggleHelp = toggleHelp;
     window.openHelp = openHelp;
     window.closeHelp = closeHelp;
     window.initHelpTour = initHelpTour;
-    window._helpCardDefs = _helpCardDefs;
-    window._openHelpAnchored = _openHelpAnchored;
-    window._positionHelpRows = _positionHelpRows;
-    window._drawHelpArrows = _drawHelpArrows;
-    window._openHelpStacked = _openHelpStacked;
-    window._helpResizeHandler = _helpResizeHandler;
-    window._helpKeyHandler = _helpKeyHandler;
 })();

@@ -160,10 +160,6 @@ function getHelpTourMethod(name, context) {
 
 function installHelpTourFallbacks() {
     if (typeof window.toggleHelp === 'function') return;
-    if (window.HelpTour && typeof window.HelpTour.toggleHelp === 'function') {
-        window.toggleHelp = window.HelpTour.toggleHelp;
-        return;
-    }
     window.toggleHelp = function() {
         reportHelpTourModuleUnavailable('help button click');
     };
