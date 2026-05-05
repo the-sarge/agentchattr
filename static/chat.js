@@ -2435,62 +2435,9 @@ function scrollToMessage(msgId) {
     el.classList.add('highlight');
     setTimeout(() => el.classList.remove('highlight'), 1500);
 }
+window.scrollToMessage = scrollToMessage;
 
-// --- Todos ---
-
-function todoStatusLabel(status) {
-    if (!status) return 'pin';
-    if (status === 'todo') return 'done?';
-    return 'unpin';
-}
-
-function todoCycle(msgId) {
-    if (!ws || ws.readyState !== WebSocket.OPEN) return;
-    const status = todos[msgId] || null;
-    if (!status) {
-        ws.send(JSON.stringify({ type: 'todo_add', id: msgId }));
-    } else if (status === 'todo') {
-        ws.send(JSON.stringify({ type: 'todo_toggle', id: msgId }));
-    } else {
-        // done → remove
-        ws.send(JSON.stringify({ type: 'todo_remove', id: msgId }));
-    }
-}
-
-function todoAdd(msgId) {
-    if (!ws || ws.readyState !== WebSocket.OPEN) return;
-    ws.send(JSON.stringify({ type: 'todo_add', id: msgId }));
-}
-
-function todoToggle(msgId) {
-    if (!ws || ws.readyState !== WebSocket.OPEN) return;
-    ws.send(JSON.stringify({ type: 'todo_toggle', id: msgId }));
-}
-
-function todoRemove(msgId) {
-    if (!ws || ws.readyState !== WebSocket.OPEN) return;
-    ws.send(JSON.stringify({ type: 'todo_remove', id: msgId }));
-}
-
-function updateTodoState(msgId, status) {
-    const el = document.querySelector(`.message[data-id="${msgId}"]`);
-    if (!el) return;
-
-    el.classList.remove('msg-todo', 'msg-todo-todo', 'msg-todo-done');
-
-    if (status === 'todo') {
-        el.classList.add('msg-todo', 'msg-todo-todo');
-    } else if (status === 'done') {
-        el.classList.add('msg-todo', 'msg-todo-done');
-    }
-
-    const hint = el.querySelector('.todo-hint');
-    if (hint) hint.textContent = todoStatusLabel(status);
-
-    // Update panel if open
-    const panel = document.getElementById('pins-panel');
-    if (!panel.classList.contains('hidden')) renderTodosPanel();
-}
+// Pin/todo actions and panel rendering live in pins-todos.js.
 
 // --- Delete mode ---
 
@@ -2689,61 +2636,7 @@ function handleDeleteBroadcast(ids) {
     if (panel && !panel.classList.contains('hidden')) renderTodosPanel();
 }
 
-function togglePinsPanel() {
-    _preserveScroll(() => {
-        const panel = document.getElementById('pins-panel');
-        panel.classList.toggle('hidden');
-        document.getElementById('pins-toggle').classList.toggle('active', !panel.classList.contains('hidden'));
-        if (!panel.classList.contains('hidden')) {
-            renderTodosPanel();
-        }
-    });
-}
-
-function renderTodosPanel() {
-    const list = document.getElementById('pins-list');
-    list.innerHTML = '';
-
-    const todoIds = Object.keys(todos);
-    if (todoIds.length === 0) {
-        list.innerHTML = '<div class="pins-empty">No pinned messages</div>';
-        return;
-    }
-
-    // Chronological order (by message ID)
-    const sorted = todoIds.map(Number).sort((a, b) => a - b);
-
-    for (const id of sorted) {
-        const el = document.querySelector(`.message[data-id="${id}"]`);
-        if (!el) continue;
-
-        const status = todos[id];
-        const item = document.createElement('div');
-        item.className = `todo-item ${status === 'done' ? 'todo-done' : ''}`;
-
-        const time = el.querySelector('.msg-time')?.textContent || '';
-        const sender = (el.querySelector('.msg-sender')?.textContent || '').trim();
-        const text = el.querySelector('.msg-text')?.textContent || '';
-        const senderColor = el.querySelector('.msg-sender')?.style.color || 'var(--text)';
-
-        const check = status === 'done' ? '&#10003;' : '&#9675;';
-        const checkClass = status === 'done' ? 'todo-check done' : 'todo-check';
-        const msgChannel = el.dataset.channel || 'general';
-
-        item.innerHTML = `<button class="${checkClass}" onclick="todoToggle(${id})">${check}</button><span class="msg-time" style="color:var(--accent);font-weight:600;margin-right:4px">#${msgChannel}</span> <span class="msg-time">${escapeHtml(time)}</span> <span class="msg-sender" style="color: ${senderColor}">${escapeHtml(sender)}</span> <span class="msg-text">${escapeHtml(text)}</span><button class="dismiss-btn danger" onclick="todoRemove(${id})" title="Remove from todos">&times;</button>`;
-        item.addEventListener('click', (e) => {
-            if (e.target.closest('button')) return;
-            // Cross-channel pin: switch channel if needed
-            const msgChannel = el.dataset.channel || 'general';
-            if (msgChannel !== activeChannel) {
-                switchChannel(msgChannel);
-            }
-            scrollToMessage(id);
-            togglePinsPanel();
-        });
-        list.appendChild(item);
-    }
-}
+// togglePinsPanel() and renderTodosPanel() are provided by pins-todos.js.
 
 // --- Mention toggles ---
 
