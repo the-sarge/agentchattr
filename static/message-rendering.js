@@ -28,6 +28,8 @@
     }
 
     function htmlAttr(value) {
+        const escapeAttr = getBridgeFn('escapeAttr', null);
+        if (escapeAttr) return escapeAttr(value);
         return String(value ?? '').replace(/[&<>"']/g, (ch) => ({
             '&': '&amp;',
             '<': '&lt;',
@@ -165,6 +167,97 @@
         }
     }
 
+    function callBridgeAction(name, context, ...args) {
+        const fn = getBridgeFn(name, null);
+        if (fn) fn(...args);
+    }
+
+    function messageIdFor(actionEl, action) {
+        const id = actionEl.dataset.messageId;
+        if (id) return id;
+        console.error(`MessageRendering: missing message id for ${action}`, actionEl);
+        return null;
+    }
+
+    function renderMessageActions(msgId) {
+        const id = htmlAttr(msgId);
+        return `<div class="msg-actions"><button type="button" class="reply-btn" data-message-action="reply" data-message-id="${id}">reply</button><button type="button" class="delete-btn" data-message-action="delete" data-message-id="${id}" title="Delete">del</button></div>`;
+    }
+
+    function handleMessageActionClick(event) {
+        const target = event.target instanceof Element ? event.target : null;
+        if (!target) return;
+        const actionEl = target.closest('[data-message-action]');
+        const messages = document.getElementById('messages');
+        if (!actionEl || !messages || !messages.contains(actionEl)) return;
+
+        const action = actionEl.dataset.messageAction;
+        if (!action) return;
+
+        if (actionEl instanceof HTMLButtonElement) event.preventDefault();
+
+        if (action === 'show-role-picker') {
+            const agent = actionEl.dataset.agent;
+            if (!agent) {
+                console.error('MessageRendering: missing role picker agent', actionEl);
+                return;
+            }
+            callBridgeAction('showBubbleRolePicker', 'role picker click', actionEl, agent);
+            return;
+        }
+
+        if (action === 'scroll-to-message') {
+            const targetId = actionEl.dataset.targetMessageId;
+            if (!targetId) {
+                console.error('MessageRendering: missing scroll target id', actionEl);
+                return;
+            }
+            callBridgeAction('scrollToMessage', 'reply quote click', targetId);
+            return;
+        }
+
+        const msgId = messageIdFor(actionEl, action);
+        if (!msgId) return;
+
+        if (action === 'reply') {
+            callBridgeAction('startReply', 'reply button click', msgId, event);
+        } else if (action === 'delete') {
+            callBridgeAction('deleteClick', 'delete button click', msgId, event);
+        } else if (action === 'todo-cycle') {
+            event.stopPropagation();
+            callBridgeAction('todoCycle', 'todo button click', msgId);
+        } else if (action === 'start-job') {
+            event.stopPropagation();
+            callBridgeAction('startJobFromMessage', 'convert to job click', msgId);
+        } else if (action === 'copy-message') {
+            callBridgeAction('copyMessage', 'copy message click', msgId, event);
+        } else if (action === 'resolve-decision') {
+            const choice = actionEl.dataset.decisionChoice;
+            if (choice === undefined) {
+                console.error('MessageRendering: missing decision choice', actionEl);
+                return;
+            }
+            callBridgeAction('resolveDecision', 'decision choice click', msgId, choice);
+        } else if (action === 'accept-proposal') {
+            callBridgeAction('acceptProposal', 'job proposal accept click', msgId);
+        } else if (action === 'request-proposal-changes') {
+            callBridgeAction('requestChangesProposal', 'job proposal request changes click', msgId);
+        } else if (action === 'dismiss-proposal') {
+            callBridgeAction('dismissProposal', 'job proposal dismiss click', msgId);
+        } else if (action === 'resolve-rule-proposal') {
+            const resolution = actionEl.dataset.resolution;
+            if (!resolution) {
+                console.error('MessageRendering: missing rule proposal resolution', actionEl);
+                return;
+            }
+            callBridgeAction('resolveRuleProposal', 'rule proposal resolve click', msgId, resolution);
+        } else if (action === 'dismiss-rule-proposal') {
+            callBridgeAction('dismissRuleProposal', 'rule proposal dismiss click', msgId);
+        } else {
+            console.error('MessageRendering: unknown action', action);
+        }
+    }
+
     // --- Date dividers ---
 
     function getMessageDate(msg) {
@@ -270,15 +363,15 @@
                     ${body ? `<div class="proposal-body">${body}</div>` : ''}
                     ${isPending ? `
                         <div class="proposal-actions">
-                            <button class="proposal-accept" onclick="acceptProposal(${msg.id})">Accept</button>
-                            <button class="proposal-request-changes" onclick="requestChangesProposal(${msg.id})">Request Changes</button>
-                            <button class="proposal-dismiss" onclick="dismissProposal(${msg.id})">Dismiss</button>
+                            <button type="button" class="proposal-accept" data-message-action="accept-proposal" data-message-id="${htmlAttr(msg.id)}">Accept</button>
+                            <button type="button" class="proposal-request-changes" data-message-action="request-proposal-changes" data-message-id="${htmlAttr(msg.id)}">Request Changes</button>
+                            <button type="button" class="proposal-dismiss" data-message-action="dismiss-proposal" data-message-id="${htmlAttr(msg.id)}">Dismiss</button>
                         </div>
                     ` : `
                         <div class="proposal-status-resolved">${status === 'accepted' ? 'Accepted' : 'Dismissed'}</div>
                     `}
                 </div>
-                ${!isPending ? `<div class="msg-actions"><button class="reply-btn" onclick="startReply(${msg.id}, event)">reply</button><button class="delete-btn" onclick="deleteClick(${msg.id}, event)" title="Delete">del</button></div>` : ''}`;
+                ${!isPending ? renderMessageActions(msg.id) : ''}`;
         } else if (msg.type === 'rule_proposal') {
             el.classList.add('proposal-msg');
             const meta = msg.metadata || {};
@@ -295,15 +388,15 @@
                     <div class="rule-proposal-text">${ruleText}</div>
                     ${isPending ? `
                         <div class="proposal-actions">
-                            <button class="proposal-accept" onclick="resolveRuleProposal(${msg.id}, 'activate')">Activate</button>
-                            <button class="proposal-request-changes" onclick="resolveRuleProposal(${msg.id}, 'draft')">Add to drafts</button>
-                            <button class="proposal-dismiss" onclick="dismissRuleProposal(${msg.id})">Dismiss</button>
+                            <button type="button" class="proposal-accept" data-message-action="resolve-rule-proposal" data-message-id="${htmlAttr(msg.id)}" data-resolution="activate">Activate</button>
+                            <button type="button" class="proposal-request-changes" data-message-action="resolve-rule-proposal" data-message-id="${htmlAttr(msg.id)}" data-resolution="draft">Add to drafts</button>
+                            <button type="button" class="proposal-dismiss" data-message-action="dismiss-rule-proposal" data-message-id="${htmlAttr(msg.id)}">Dismiss</button>
                         </div>
                     ` : `
                         <div class="proposal-status-resolved">${status === 'activated' ? 'Activated' : status === 'drafted' ? 'Added to drafts' : 'Dismissed'}</div>
                     `}
                 </div>
-                ${!isPending ? `<div class="msg-actions"><button class="reply-btn" onclick="startReply(${msg.id}, event)">reply</button><button class="delete-btn" onclick="deleteClick(${msg.id}, event)" title="Delete">del</button></div>` : ''}`;
+                ${!isPending ? renderMessageActions(msg.id) : ''}`;
         } else if (window._messageRenderers && window._messageRenderers[msg.type]) {
             window._messageRenderers[msg.type](el, msg);
         } else if (msg.type === 'system' || msg.sender === 'system') {
@@ -351,21 +444,22 @@
                     const parentText = parentEl.dataset.rawText || parentEl.querySelector('.msg-text')?.textContent || '';
                     const truncated = parentText.length > 80 ? parentText.slice(0, 80) + '...' : parentText;
                     const parentColor = parentEl.querySelector('.msg-sender')?.style.color || 'var(--text-dim)';
-                    replyHtml = `<div class="reply-quote" onclick="scrollToMessage(${msg.reply_to})"><span class="reply-sender" style="color: ${parentColor}">${htmlEscape(parentSender)}</span> ${htmlEscape(truncated)}</div>`;
+                    replyHtml = `<div class="reply-quote" data-message-action="scroll-to-message" data-target-message-id="${htmlAttr(msg.reply_to)}"><span class="reply-sender" style="color: ${parentColor}">${htmlEscape(parentSender)}</span> ${htmlEscape(truncated)}</div>`;
                 }
             }
 
             const agentKey = (resolveAgentBridge(msg.sender.toLowerCase()) || msg.sender).toLowerCase();
             const hatSvg = getAgentHats()[agentKey] || '';
-            const hatHtml = hatSvg ? `<div class="hat-overlay" data-agent="${htmlEscape(agentKey)}">${hatSvg}</div>` : '';
-            const avatarHtml = `<div class="avatar-wrap" data-agent="${htmlEscape(agentKey)}"><div class="avatar" style="background-color: ${senderColor}">${getAvatarSvgBridge(msg.sender)}</div>${hatHtml}</div>`;
+            const hatHtml = hatSvg ? `<div class="hat-overlay" data-agent="${htmlAttr(agentKey)}">${hatSvg}</div>` : '';
+            const avatarHtml = `<div class="avatar-wrap" data-agent="${htmlAttr(agentKey)}"><div class="avatar" style="background-color: ${senderColor}">${getAvatarSvgBridge(msg.sender)}</div>${hatHtml}</div>`;
 
             const statusLabel = todoStatusLabelBridge(todoStatus);
             el.dataset.rawText = msg.text;
             const senderRole = getAgentRole(msg.sender);
             const roleClass = senderRole ? 'bubble-role has-role' : 'bubble-role';
-            const rolePillHtml = !isSelf ? `<button class="${roleClass}" onclick="showBubbleRolePicker(this, '${htmlEscape(msg.sender)}')" title="${senderRole ? htmlEscape(senderRole) : 'Set role'}">${senderRole || 'choose a role'}</button>` : '';
-            // Inline decision choices (if present)
+            const rolePillLabel = senderRole || 'choose a role';
+            const rolePillHtml = !isSelf ? `<button type="button" class="${roleClass}" data-message-action="show-role-picker" data-agent="${htmlAttr(msg.sender)}" title="${senderRole ? htmlAttr(senderRole) : 'Set role'}">${htmlEscape(rolePillLabel)}</button>` : '';
+            // Decision choices (if present)
             let choicesHtml = '';
             const meta = msg.metadata || {};
             const choicesList = meta.choices || [];
@@ -374,11 +468,11 @@
                     choicesHtml = `<div class="decision-choices"><div class="decision-resolved">You chose: <strong>${htmlEscape(meta.chosen || '')}</strong></div></div>`;
                 } else {
                     choicesHtml = '<div class="decision-choices">' + choicesList.map(c =>
-                        `<button class="decision-choice" onclick="resolveDecision(${msg.id}, '${htmlEscape(c).replace(/'/g, "\\'")}')">${htmlEscape(c)}</button>`
+                        `<button type="button" class="decision-choice" data-message-action="resolve-decision" data-message-id="${htmlAttr(msg.id)}" data-decision-choice="${htmlAttr(c)}">${htmlEscape(c)}</button>`
                     ).join('') + '</div>';
                 }
             }
-            el.innerHTML = `<div class="todo-strip"></div>${isSelf ? '' : avatarHtml}<div class="chat-bubble" style="--bubble-color: ${senderColor}">${replyHtml}<div class="bubble-header"><span class="msg-sender" style="color: ${senderColor}">${htmlEscape(msg.sender)}</span>${rolePillHtml}<span class="msg-time">${msg.time || ''}</span></div><div class="msg-text">${textHtml}</div>${choicesHtml}${attachmentsHtml}<button class="convert-job-pill" onclick="startJobFromMessage(${msg.id}); event.stopPropagation();" title="Convert to job">convert to job</button><button class="bubble-copy" onclick="copyMessage(${msg.id}, event)" title="Copy message"><svg width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><rect x="9" y="9" width="13" height="13" rx="2"/><path d="M5 15H4a2 2 0 0 1-2-2V4a2 2 0 0 1 2-2h9a2 2 0 0 1 2 2v1"/></svg></button></div><div class="msg-actions"><button class="reply-btn" onclick="startReply(${msg.id}, event)">reply</button><button class="todo-hint" onclick="todoCycle(${msg.id}); event.stopPropagation();">${statusLabel}</button><button class="delete-btn" onclick="deleteClick(${msg.id}, event)" title="Delete">del</button></div>`;
+            el.innerHTML = `<div class="todo-strip"></div>${isSelf ? '' : avatarHtml}<div class="chat-bubble" style="--bubble-color: ${senderColor}">${replyHtml}<div class="bubble-header"><span class="msg-sender" style="color: ${senderColor}">${htmlEscape(msg.sender)}</span>${rolePillHtml}<span class="msg-time">${msg.time || ''}</span></div><div class="msg-text">${textHtml}</div>${choicesHtml}${attachmentsHtml}<button type="button" class="convert-job-pill" data-message-action="start-job" data-message-id="${htmlAttr(msg.id)}" title="Convert to job">convert to job</button><button type="button" class="bubble-copy" data-message-action="copy-message" data-message-id="${htmlAttr(msg.id)}" title="Copy message"><svg width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><rect x="9" y="9" width="13" height="13" rx="2"/><path d="M5 15H4a2 2 0 0 1-2-2V4a2 2 0 0 1 2-2h9a2 2 0 0 1 2 2v1"/></svg></button></div><div class="msg-actions"><button type="button" class="reply-btn" data-message-action="reply" data-message-id="${htmlAttr(msg.id)}">reply</button><button type="button" class="todo-hint" data-message-action="todo-cycle" data-message-id="${htmlAttr(msg.id)}">${htmlEscape(statusLabel)}</button><button type="button" class="delete-btn" data-message-action="delete" data-message-id="${htmlAttr(msg.id)}" title="Delete">del</button></div>`;
             if (todoStatus) el.classList.add('msg-todo', `msg-todo-${todoStatus}`);
             if (msg.metadata?.session_output) el.classList.add('session-output');
 
@@ -429,4 +523,6 @@
     };
 
     window.appendMessage = appendMessage;
+
+    document.addEventListener('click', handleMessageActionClick);
 })();

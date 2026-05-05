@@ -22,6 +22,7 @@
     }
 
     function htmlAttr(value) {
+        if (typeof window.escapeAttr === 'function') return window.escapeAttr(value);
         return String(value ?? '').replace(/[&<>"']/g, (ch) => ({
             '&': '&amp;',
             '<': '&lt;',

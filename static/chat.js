@@ -2231,7 +2231,7 @@ let deleteDragging = false;
 
 function deleteClick(msgId, event) {
     event.stopPropagation();
-    enterDeleteMode(msgId);
+    enterDeleteMode(Number(msgId));
 }
 
 function enterDeleteMode(initialId) {
@@ -2651,6 +2651,17 @@ function escapeHtml(text) {
     return div.innerHTML;
 }
 window.escapeHtml = escapeHtml;
+
+function escapeAttr(value) {
+    return String(value ?? '').replace(/[&<>"']/g, (ch) => ({
+        '&': '&amp;',
+        '<': '&lt;',
+        '>': '&gt;',
+        '"': '&quot;',
+        "'": '&#39;',
+    }[ch]));
+}
+window.escapeAttr = escapeAttr;
 
 // Schedule strip and popover are provided by schedules.js.
 
