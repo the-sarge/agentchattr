@@ -14,17 +14,26 @@
         { value: 'warm-bell', label: 'Warm Bell' },
         { value: 'none', label: 'None' },
     ];
+    const SOUND_PREFS_KEY = 'agentchattr-sounds';
     const DEFAULT_SOUND = 'soft-chime';
     const CROSS_CHANNEL_SOUND = 'pluck';
     const soundCache = {};
 
     let pendingChannelSwitch = null;
     let soundPrefs = {};
+    let rawSoundPrefs = '{}';
 
     try {
-        soundPrefs = JSON.parse(localStorage.getItem('agentchattr-sounds') || '{}');
-    } catch (_err) {
+        rawSoundPrefs = localStorage.getItem(SOUND_PREFS_KEY) || '{}';
+        soundPrefs = JSON.parse(rawSoundPrefs);
+    } catch (err) {
+        console.error('Corrupt agentchattr-sounds, resetting:', err, rawSoundPrefs);
         soundPrefs = {};
+        try {
+            localStorage.removeItem(SOUND_PREFS_KEY);
+        } catch (removeErr) {
+            console.error('Unable to remove corrupt agentchattr-sounds:', removeErr);
+        }
     }
 
     function getEl(id) {
@@ -42,6 +51,10 @@
 
     function socketIsOpen(socket) {
         return socket && (typeof WebSocket === 'undefined' || socket.readyState === WebSocket.OPEN);
+    }
+
+    function reportMissingBridge(name) {
+        console.error(`Settings: ${name} bridge not registered`);
     }
 
     function playSound(soundName) {
@@ -107,7 +120,7 @@
             select.addEventListener('change', () => {
                 const val = select.value;
                 soundPrefs[name] = val;
-                localStorage.setItem('agentchattr-sounds', JSON.stringify(soundPrefs));
+                localStorage.setItem(SOUND_PREFS_KEY, JSON.stringify(soundPrefs));
                 playSound(val);
             });
 
@@ -124,7 +137,11 @@
             if (!window.agentchattrProjectTitle) document.title = data.title;
         }
         if (data.username) {
-            if (typeof window._setUsername === 'function') window._setUsername(data.username);
+            if (typeof window._setUsername === 'function') {
+                window._setUsername(data.username);
+            } else {
+                reportMissingBridge('window._setUsername');
+            }
             const senderLabel = getEl('sender-label');
             if (senderLabel) senderLabel.textContent = data.username;
             setValue('setting-username', data.username);
@@ -155,15 +172,31 @@
             if (!window.channelList.includes(window.activeChannel)) {
                 window._setActiveChannel('general');
                 localStorage.setItem('agentchattr-channel', 'general');
-                window.Store?.set('activeChannel', 'general');
-                if (typeof window.filterMessagesByChannel === 'function') window.filterMessagesByChannel();
+                if (window.Store && typeof window.Store.set === 'function') {
+                    window.Store.set('activeChannel', 'general');
+                } else {
+                    reportMissingBridge('window.Store.set');
+                }
+                if (typeof window.filterMessagesByChannel === 'function') {
+                    window.filterMessagesByChannel();
+                } else {
+                    reportMissingBridge('window.filterMessagesByChannel');
+                }
             }
-            if (typeof window.renderChannelTabs === 'function') window.renderChannelTabs();
+            if (typeof window.renderChannelTabs === 'function') {
+                window.renderChannelTabs();
+            } else {
+                reportMissingBridge('window.renderChannelTabs');
+            }
 
             if (pendingChannelSwitch && window.channelList.includes(pendingChannelSwitch)) {
                 const name = pendingChannelSwitch;
                 pendingChannelSwitch = null;
-                if (typeof window.switchChannel === 'function') window.switchChannel(name);
+                if (typeof window.switchChannel === 'function') {
+                    window.switchChannel(name);
+                } else {
+                    reportMissingBridge('window.switchChannel');
+                }
             }
         }
     }
@@ -199,6 +232,7 @@
     }
 
     function setupSettingsKeys() {
+        // Auto-save on blur/Enter for text/number fields.
         for (const id of ['setting-username', 'setting-hops']) {
             const el = getEl(id);
             if (!el) continue;
@@ -214,6 +248,7 @@
             });
         }
 
+        // Auto-save on change for selects, escape to close.
         for (const id of ['setting-font', 'setting-history', 'setting-contrast', 'setting-rules-refresh']) {
             const el = getEl(id);
             if (!el) continue;
