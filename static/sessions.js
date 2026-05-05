@@ -8,7 +8,7 @@
  * Subscribes to Hub for WS events and watches Store for channel changes.
  *
  * Reads from window: activeChannel, username, SESSION_TOKEN, ws,
- *                    agentConfig, escapeHtml, switchChannel
+ *                    agentConfig, escapeAttr, escapeHtml, switchChannel
  */
 
 // ---------------------------------------------------------------------------
@@ -19,6 +19,81 @@ let activeSession = null;
 let sessionTemplates = [];
 let activeSessionsByChannel = {};
 let sessionIndicatorTargetChannel = null;
+
+function sessionEscapeAttr(value) {
+    if (typeof window.escapeAttr === 'function') return window.escapeAttr(value);
+    return String(value ?? '').replace(/[&<>"']/g, (ch) => ({
+        '&': '&amp;',
+        '<': '&lt;',
+        '>': '&gt;',
+        '"': '&quot;',
+        "'": '&#39;',
+    }[ch]));
+}
+
+function sessionActionAttrs(action, attrs = {}) {
+    const parts = [`data-session-action="${sessionEscapeAttr(action)}"`];
+    for (const [key, value] of Object.entries(attrs)) {
+        parts.push(`data-${key}="${sessionEscapeAttr(value)}"`);
+    }
+    return parts.join(' ');
+}
+
+function handleSessionActionClick(event) {
+    const target = event.target instanceof Element ? event.target : null;
+    if (!target) return;
+    const actionEl = target.closest('[data-session-action]');
+    if (!actionEl) return;
+
+    const action = actionEl.dataset.sessionAction;
+    if (!action) return;
+    if (actionEl instanceof HTMLButtonElement) event.preventDefault();
+
+    const templateId = actionEl.dataset.templateId;
+    const msgId = actionEl.dataset.messageId;
+    const draftId = actionEl.dataset.draftId;
+    const proposedBy = actionEl.dataset.proposedBy;
+
+    if (action === 'scroll-output') {
+        if (msgId) scrollToSessionOutput(msgId);
+    } else if (action === 'request-draft-changes') {
+        if (draftId && proposedBy && msgId) requestDraftChanges(draftId, proposedBy, msgId);
+    } else if (action === 'dismiss-draft') {
+        if (msgId) dismissDraft(msgId);
+    } else if (action === 'run-draft') {
+        if (msgId) runDraft(msgId);
+    } else if (action === 'save-draft') {
+        if (msgId) saveDraft(msgId, actionEl);
+    } else if (action === 'show-cast-preview') {
+        if (templateId) showCastPreview(templateId);
+    } else if (action === 'toggle-template-delete') {
+        event.stopPropagation();
+        if (templateId) toggleDeleteSessionTemplateConfirm(actionEl, templateId, event);
+    } else if (action === 'send-design-request') {
+        sendDesignRequest();
+    } else if (action === 'close-modal') {
+        actionEl.closest('.session-launcher-overlay')?.remove();
+    } else if (action === 'cast-back') {
+        sessionCastBack();
+    } else if (action === 'launch-session') {
+        if (templateId) launchSessionWithCast(templateId);
+    } else if (action === 'launch-draft-session') {
+        if (msgId) launchDraftSession(msgId);
+    } else if (action === 'submit-draft-changes') {
+        if (draftId && proposedBy && msgId) submitDraftChanges(draftId, proposedBy, msgId);
+    } else if (action === 'dismiss-draft-changes') {
+        dismissDraftChanges(actionEl);
+    } else {
+        console.error('Sessions: unknown action', action);
+    }
+}
+
+function handleSessionCastChange(event) {
+    const target = event.target instanceof Element ? event.target : null;
+    if (target?.classList.contains('session-cast-select')) {
+        syncSessionCastRole(target);
+    }
+}
 
 // ---------------------------------------------------------------------------
 // Message Renderers
@@ -48,7 +123,7 @@ window._messageRenderers['session_start'] = function (el, msg) {
 window._messageRenderers['session_end'] = function (el, msg) {
     el.classList.add('system-msg', 'session-banner', 'session-banner-end');
     const outputId = msg.metadata?.output_message_id;
-    const jumpLink = outputId ? ` <span class="session-output-link" onclick="scrollToSessionOutput(${outputId})">View output</span>` : '';
+    const jumpLink = outputId ? ` <span class="session-output-link" ${sessionActionAttrs('scroll-output', {'message-id': outputId})}>View output</span>` : '';
     el.innerHTML = `<span class="session-banner-icon">&#9632;</span> <strong>${window.escapeHtml(msg.text)}</strong>${jumpLink}`;
 };
 
@@ -91,8 +166,8 @@ window._messageRenderers['session_draft'] = function (el, msg) {
                 <div class="proposal-body session-proposal-desc">This draft needs changes before it can be run or saved.</div>
                 <ul class="session-draft-errors">${errorList}</ul>
                 <div class="proposal-actions">
-                    <button class="proposal-request-changes" onclick="requestDraftChanges('${window.escapeHtml(draftId)}', '${window.escapeHtml(proposedBy)}', ${msg.id})">Request Changes</button>
-                    <button class="proposal-dismiss" onclick="dismissDraft(${msg.id})">Dismiss</button>
+                    <button type="button" class="proposal-request-changes" ${sessionActionAttrs('request-draft-changes', {'draft-id': draftId, 'proposed-by': proposedBy, 'message-id': msg.id})}>Request Changes</button>
+                    <button type="button" class="proposal-dismiss" ${sessionActionAttrs('dismiss-draft', {'message-id': msg.id})}>Dismiss</button>
                 </div>
             </div>`;
     } else {
@@ -129,10 +204,10 @@ window._messageRenderers['session_draft'] = function (el, msg) {
                     ${phasesDetailHtml}
                 </div>
                 <div class="proposal-actions">
-                    <button class="proposal-accept" onclick="runDraft(${msg.id})">Run</button>
-                    <button class="proposal-request-changes session-draft-btn-save" onclick="saveDraft(${msg.id}, this)">Save Template</button>
-                    <button class="proposal-request-changes" onclick="requestDraftChanges('${window.escapeHtml(draftId)}', '${window.escapeHtml(proposedBy)}', ${msg.id})">Request Changes</button>
-                    <button class="proposal-dismiss" onclick="dismissDraft(${msg.id})">Dismiss</button>
+                    <button type="button" class="proposal-accept" ${sessionActionAttrs('run-draft', {'message-id': msg.id})}>Run</button>
+                    <button type="button" class="proposal-request-changes session-draft-btn-save" ${sessionActionAttrs('save-draft', {'message-id': msg.id})}>Save Template</button>
+                    <button type="button" class="proposal-request-changes" ${sessionActionAttrs('request-draft-changes', {'draft-id': draftId, 'proposed-by': proposedBy, 'message-id': msg.id})}>Request Changes</button>
+                    <button type="button" class="proposal-dismiss" ${sessionActionAttrs('dismiss-draft', {'message-id': msg.id})}>Dismiss</button>
                 </div>
             </div>`;
         // Supersede older revisions of the same draft
@@ -341,11 +416,11 @@ function buildSessionCastEditor(tmpl, cast, assignees) {
         return (tmpl.roles || []).map(role => {
             const assigned = cast ? cast[role] : '';
             const options = assignees.map(a =>
-                `<option value="${window.escapeHtml(a)}" ${a === assigned ? 'selected' : ''}>${window.escapeHtml(a)}</option>`
+                `<option value="${sessionEscapeAttr(a)}" ${a === assigned ? 'selected' : ''}>${window.escapeHtml(a)}</option>`
             ).join('');
             return `<div class="session-cast-row">
                 <span class="session-cast-role">${window.escapeHtml(role)}</span>
-                <select class="session-cast-select" data-role="${window.escapeHtml(role)}" onchange="syncSessionCastRole(this)">${options}</select>
+                <select class="session-cast-select" data-role="${sessionEscapeAttr(role)}">${options}</select>
             </div>`;
         }).join('');
     }
@@ -354,11 +429,11 @@ function buildSessionCastEditor(tmpl, cast, assignees) {
         const participantRows = (phase.participants || []).map(role => {
             const assigned = cast ? cast[role] : '';
             const options = assignees.map(a =>
-                `<option value="${window.escapeHtml(a)}" ${a === assigned ? 'selected' : ''}>${window.escapeHtml(a)}</option>`
+                `<option value="${sessionEscapeAttr(a)}" ${a === assigned ? 'selected' : ''}>${window.escapeHtml(a)}</option>`
             ).join('');
             return `<div class="session-cast-row">
                 <span class="session-cast-role">${window.escapeHtml(role)}</span>
-                <select class="session-cast-select" data-role="${window.escapeHtml(role)}" onchange="syncSessionCastRole(this)">${options}</select>
+                <select class="session-cast-select" data-role="${sessionEscapeAttr(role)}">${options}</select>
             </div>`;
         }).join('');
 
@@ -386,8 +461,8 @@ function showSessionLauncher() {
     modal.onclick = (e) => { if (e.target === modal) modal.remove(); };
 
     let templateOptions = sessionTemplates.map(t =>
-        `<div class="session-tmpl-card" onclick="showCastPreview('${window.escapeHtml(t.id)}')" title="${window.escapeHtml(t.description || '')}">
-            ${t.is_custom ? `<span class="session-tmpl-delete-wrap"><button class="session-tmpl-delete" onclick="toggleDeleteSessionTemplateConfirm(this, '${window.escapeHtml(t.id)}', event)" title="Delete custom template">Delete</button></span>` : ''}
+        `<div class="session-tmpl-card" ${sessionActionAttrs('show-cast-preview', {'template-id': t.id})} title="${sessionEscapeAttr(t.description || '')}">
+            ${t.is_custom ? `<span class="session-tmpl-delete-wrap"><button type="button" class="session-tmpl-delete" ${sessionActionAttrs('toggle-template-delete', {'template-id': t.id})} title="Delete custom template">Delete</button></span>` : ''}
             <div class="session-tmpl-name">${window.escapeHtml(t.name)}</div>
             <div class="session-tmpl-desc">${window.escapeHtml(t.description || '')}</div>
             <div class="session-tmpl-roles">${(t.roles || []).map(r => `<span class="session-role-pill">${window.escapeHtml(r)}</span>`).join(' ')}</div>
@@ -397,7 +472,7 @@ function showSessionLauncher() {
     // "Design a session" card -- lets user describe what they want and pick an agent to draft it
     const agents = _getAvailableAgents();
     const agentOptions = agents.map(a =>
-        `<option value="${window.escapeHtml(a)}">${window.escapeHtml(a)}</option>`
+        `<option value="${sessionEscapeAttr(a)}">${window.escapeHtml(a)}</option>`
     ).join('');
     const designCard = `
         <div class="session-tmpl-card session-design-card">
@@ -406,7 +481,7 @@ function showSessionLauncher() {
             <div class="session-design-row">
                 <select id="session-design-agent" class="session-design-select">${agentOptions}</select>
                 <input id="session-design-desc" type="text" class="session-design-input" placeholder="Describe the session you want..." />
-                <button class="session-draft-btn run" onclick="sendDesignRequest()">Ask</button>
+                <button type="button" class="session-draft-btn run" ${sessionActionAttrs('send-design-request')}>Ask</button>
             </div>
         </div>`;
 
@@ -414,7 +489,7 @@ function showSessionLauncher() {
         <div class="session-launcher-dialog">
             <div class="session-launcher-header">
                 <span>Start a Session</span>
-                <button onclick="this.closest('.session-launcher-overlay').remove()">&times;</button>
+                <button type="button" ${sessionActionAttrs('close-modal')}>&times;</button>
             </div>
             <div class="session-launcher-goal">
                 <input id="session-goal-input" type="text" placeholder="Goal (optional) -- what should this session achieve?" />
@@ -468,11 +543,11 @@ function showCastPreview(templateId) {
 
     castStep.innerHTML = `
         <div class="session-cast-header">
-            <button class="session-back-btn" onclick="sessionCastBack()">&larr;</button>
+            <button type="button" class="session-back-btn" ${sessionActionAttrs('cast-back')}>&larr;</button>
             <span>${window.escapeHtml(tmpl.name)} -- Cast</span>
         </div>
         <div class="session-cast-list">${roleRows}</div>
-        <button class="session-start-btn" onclick="launchSessionWithCast('${window.escapeHtml(templateId)}')">Start Session</button>
+        <button type="button" class="session-start-btn" ${sessionActionAttrs('launch-session', {'template-id': templateId})}>Start Session</button>
     `;
 }
 
@@ -645,14 +720,14 @@ function showDraftCastPreview(tmpl, draftMsgId) {
         <div class="session-launcher-dialog">
             <div class="session-launcher-header">
                 <span>${window.escapeHtml(tmpl.name || '?')} -- Cast</span>
-                <button onclick="this.closest('.session-launcher-overlay').remove()">&times;</button>
+                <button type="button" ${sessionActionAttrs('close-modal')}>&times;</button>
             </div>
             <div class="session-launcher-goal">
                 <input id="session-goal-input" type="text" placeholder="Goal (optional)" />
             </div>
             <div id="session-step-cast">
                 <div class="session-cast-list">${roleRows}</div>
-                <button class="session-start-btn" onclick="launchDraftSession(${draftMsgId})">Start Session</button>
+                <button type="button" class="session-start-btn" ${sessionActionAttrs('launch-draft-session', {'message-id': draftMsgId})}>Start Session</button>
             </div>
         </div>
     `;
@@ -799,8 +874,8 @@ function requestDraftChanges(draftId, proposedBy, msgId) {
     inputRow.innerHTML = `
         <textarea class="draft-changes-textarea" rows="2" placeholder="What changes do you want?"></textarea>
         <div class="draft-changes-btns">
-            <button class="session-draft-btn run" onclick="submitDraftChanges('${window.escapeHtml(draftId)}', '${window.escapeHtml(proposedBy)}', ${msgId})">Send</button>
-            <button class="session-draft-btn dismiss" onclick="dismissDraftChanges(this)">Cancel</button>
+            <button type="button" class="session-draft-btn run" ${sessionActionAttrs('submit-draft-changes', {'draft-id': draftId, 'proposed-by': proposedBy, 'message-id': msgId})}>Send</button>
+            <button type="button" class="session-draft-btn dismiss" ${sessionActionAttrs('dismiss-draft-changes')}>Cancel</button>
         </div>
     `;
     actions.after(inputRow);
@@ -909,8 +984,11 @@ function _sessionsInit() {
     fetchActiveSession();
 }
 
+document.addEventListener('click', handleSessionActionClick);
+document.addEventListener('change', handleSessionCastChange);
+
 // ---------------------------------------------------------------------------
-// Window exports (for inline onclick handlers in generated HTML)
+// Window exports for existing static HTML handlers and cross-module callers.
 // ---------------------------------------------------------------------------
 
 window.showSessionLauncher = showSessionLauncher;
