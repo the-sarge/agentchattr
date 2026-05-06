@@ -23,21 +23,35 @@ frontend improvements, and follow-on hardening work.
 
 Implemented:
 
-- `./ac <project> up/status/attach/down`
+- `./ac <project> up/status/attach/down/restart/logs/check`
+- `./ac list`
+- `./ac <project> up --dry-run`
 - team TOML config overlays via `AGENTCHATTR_PROJECT_CONFIG`
 - project-specific tmux prefixes via `AGENTCHATTR_TMUX_PREFIX`
 - provider aliases such as `provider = "claude"` for custom handles
+- shared `[agent_defaults.<provider>]`
+- per-agent `args`
 - config-seeded roles
+- optional agent `team` metadata and `@team:<name>` routing
+- `@role:<name>` routing
 - detached wrapper startup for multi-agent launches
+- runner preflight for duplicate ports/prefixes, missing commands, bad paths,
+  and team schema issues
+- persisted project server logs at `data_dir/server.log`
 - loop guard max/default increased to `100`
-- example team file at `teams/project-a.toml.example`
+- example team files for two-agent, large roster, API-agent, and project-a
 - operating guide at `TEAM_RUNNER_GUIDE.md`
+- Agent Operations UI with configured/running sections and attach command copy
+- project-aware UI metadata and document title
+- server-backed search and command palette
 
 Validated:
 
 - single-project Docker smoke test with fake agents
 - two simultaneous Docker project smoke test on separate ports
 - project isolation for roles, labels, colors, tmux sessions, and shutdown
+- runner/config validation with pytest coverage
+- team/role routing with pytest coverage
 
 ## Phase 1: Stabilize Team Runner
 

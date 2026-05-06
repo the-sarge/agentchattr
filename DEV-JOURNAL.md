@@ -344,3 +344,66 @@ new `@team:<name>` / `@role:<name>` routing.
    working order.
 3. Keep future Docker design dependent on the runner's dry-run/preflight
    planner instead of inventing a separate launch model.
+
+---
+
+## 2026-05-06 00:59 EDT - Runner Config Polish Closeout
+
+**Branch:** `main`
+**Base Commit:** `c788b05`
+**Commits:** `371ac63`
+
+### Summary
+
+Closed the runner/config polish slice that replaced the postponed Docker start.
+The host/tmux runner now has a stronger preflight path, explicit `check`
+command, persisted server logs, and tighter team schema validation around
+labels, paths, and routable team/role metadata.
+
+### Decisions
+
+- Keep Phase 7 Docker postponed until the host runner's launch planning is
+  reliable enough to reuse.
+- Treat `./ac <project> check` as the operator-facing validation command, with
+  `up --dry-run` reserved for printing the planned sessions, paths, ports, and
+  commands.
+- Persist server output under `data_dir/server.log` so startup crashes are
+  diagnosable even if the tmux pane exits immediately.
+- Keep team/role metadata constrained to values that round-trip cleanly through
+  `@team:<name>` and `@role:<name>` routing.
+
+### Changes
+
+- Added `./ac <project> check`.
+- Added path preflight for data/upload targets and agent `cwd` values.
+- Wrapped missing/failing tmux starts with clear `SystemExit` messages.
+- Updated server startup to tee output into `data_dir/server.log`.
+- Tightened config validation for labels, duplicate effective labels after
+  `[agent_defaults]`, `cwd`, and routable `role` / `team` values.
+- Updated README, `TEAM_RUNNER_GUIDE.md`, and `PROJECT_PLAN.md` for the new
+  runner/config order and postponed Docker status.
+
+### Verification
+
+- Ran `python -m py_compile config_loader.py ac`.
+- Ran `.venv/bin/python -m pytest tests/test_ac_runner.py tests/test_config_schema.py`.
+- Ran `.venv/bin/python -m pytest`; latest validation passed `102` tests.
+- Ran `git diff --check`.
+- Ran `./ac two-agent up --dry-run -f teams/two-agent.toml.example` and
+  verified the planned server log path and command output.
+
+### Open Questions
+
+- The next UI pass should keep Agent Operations aligned with the runner's
+  tmux/server/MCP model rather than inventing a second source of operational
+  truth.
+- Search-result navigation still needs to load the target message into the DOM
+  when the result is outside the current visible history window.
+
+### Next Steps
+
+1. Document `@team:<name>` and `@role:<name>` in the user-facing routing docs.
+2. Add Agent Operations status badges for server, MCP HTTP/SSE, and loop guard,
+   plus clearer configured-vs-running warnings.
+3. Harden search navigation so selecting old results loads the surrounding
+   message window before scrolling.
