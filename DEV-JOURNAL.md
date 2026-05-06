@@ -270,3 +270,77 @@ new module boundaries.
    previews against realistic data.
 2. Start Phase 7 Docker Option from a fresh branch on clean `main`.
 3. Keep Docker optional and avoid disturbing the normal host/tmux workflow.
+
+---
+
+## 2026-05-06 00:23 EDT - Agent Operations Polish And Team Routing
+
+**Branch:** `main`
+**Base Commit:** `012a2ba`
+**Commits:** `ca2126e`, `3b9eee5`, `c8d8cdc`, `070f9e1`, `5ef644b`, `1c5a01c`, `57baa6f`, `9ef8e64`
+
+### Summary
+
+Closed the remaining post-Phase-5 operational polish before starting the next
+backend/runner slice. The main outcomes are a manual frontend smoke-test
+checklist, clearer message identity affordances, corrected agent tmux attach
+commands, markdown-code-safe mention routing, team-grouped agent listings, and
+new `@team:<name>` / `@role:<name>` routing.
+
+### Decisions
+
+- Postpone Phase 7 Docker work until the host/tmux runner is more reliable and
+  easier to inspect.
+- Keep Docker optional when it resumes; do not make it a prerequisite for the
+  normal project/team workflow.
+- Treat team and role routing as server-side mention expansion rather than a
+  frontend-only convenience.
+- Use configured team metadata and runtime MCP role state as the routing
+  sources of truth.
+- Keep quoted inline code and fenced code inert for all mention forms,
+  including `@agent`, `@all`, `@team:<name>`, and `@role:<name>`.
+
+### Changes
+
+- Added `FRONTEND_SMOKE_TEST_PLAN.md` for message actions, sessions,
+  attachments, schedules, search, and command palette checks.
+- Added tmux copy rows to the agent sidebar popover and fixed live attach
+  session resolution so displayed commands match real tmux sessions.
+- Added selectable dim message IDs in bubble headers and reply references.
+- Fixed quoted/fenced-code mention parsing so documentation snippets do not
+  wake agents.
+- Added optional `team` metadata to configured and registered agents, surfaced
+  it in API payloads, and sorted agent listings by team then label/name.
+- Added `@team:<name>` routing and `@role:<name>` routing with punctuation
+  boundaries, self-exclusion, loop-guard behavior, and observable sync failures
+  in HTTP mutation paths.
+
+### Verification
+
+- User browser-smoke tested the frontend checklist successfully before noting
+  the tmux attach and message-ID polish items.
+- Ran targeted `node --check` validations for changed frontend modules during
+  the frontend polish PRs.
+- Ran `.venv/bin/python -m pytest`; latest PR validation passed `91` tests.
+- Ran `python -m py_compile app.py router.py` for routing changes.
+- Ran `git diff --check` before pushing reviewed PR updates.
+
+### Open Questions
+
+- `PROJECT_PLAN.md` still lists Phase 7 Docker as the next numbered phase, but
+  we are intentionally postponing it until runner/preflight/config work is
+  tighter.
+- Some Phase 1 and Phase 2 runner/config items appear partially implemented in
+  `./ac`, `config_loader.py`, README, and the team runner guide; the next PR
+  should audit what is already real before adding more surface.
+- The static frontend still has no dedicated JS harness; manual smoke tests
+  remain the validation layer for browser-only flows.
+
+### Next Steps
+
+1. Build one focused PR for runner reliability, dry-run/preflight, and team
+   config polish.
+2. Update `PROJECT_PLAN.md` if the postponed Docker sequence becomes the new
+   working order.
+3. Keep future Docker design dependent on the runner's dry-run/preflight
+   planner instead of inventing a separate launch model.
