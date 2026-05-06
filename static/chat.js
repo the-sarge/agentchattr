@@ -993,6 +993,89 @@ const ROLE_PRESETS = [
     { label: 'Hype', emoji: '🎉' },
 ];
 
+let agentOpsAttachCache = null;
+let agentOpsAttachCacheAt = 0;
+const AGENT_OPS_ATTACH_CACHE_MS = 5000;
+
+async function getAgentOpsPayloadForPopover() {
+    const now = Date.now();
+    if (agentOpsAttachCache && now - agentOpsAttachCacheAt < AGENT_OPS_ATTACH_CACHE_MS) {
+        return agentOpsAttachCache;
+    }
+    const resp = await fetch('/api/agent-ops', {
+        headers: { 'X-Session-Token': SESSION_TOKEN },
+    });
+    if (!resp.ok) throw new Error(`agent ops request failed: ${resp.status}`);
+    agentOpsAttachCache = await resp.json();
+    agentOpsAttachCacheAt = now;
+    return agentOpsAttachCache;
+}
+
+function findPillAttachRows(payload, opts) {
+    const configured = Array.isArray(payload.configured_agents) ? payload.configured_agents : [];
+    const registered = Array.isArray(payload.registered_agents) ? payload.registered_agents : [];
+    const name = opts.name || '';
+    const base = opts.base || name;
+    const registeredRow = registered.find(row => row.name === name)
+        || registered.find(row => row.base === name)
+        || registered.find(row => row.base === base);
+    const configuredRow = configured.find(row => row.name === base)
+        || configured.find(row => row.name === name)
+        || configured.find(row => Array.isArray(row.registered_names) && row.registered_names.includes(name));
+    return { configuredRow, registeredRow };
+}
+
+function renderPillAttachCommandRow(label, command) {
+    return `<div class="pill-popover-copy-row">
+        <span class="pill-popover-copy-label">${escapeHtml(label)}</span>
+        <code class="pill-popover-command" title="${escapeAttr(command)}">${escapeHtml(command)}</code>
+        <button type="button" class="pill-popover-copy-btn" data-copy-command="${escapeAttr(command)}">copy</button>
+    </div>`;
+}
+
+async function copyPillAttachCommand(button, command) {
+    try {
+        if (!navigator.clipboard || typeof navigator.clipboard.writeText !== 'function') {
+            throw new Error('clipboard API unavailable');
+        }
+        await navigator.clipboard.writeText(command);
+        button.textContent = 'copied';
+        button.classList.add('copied');
+    } catch (err) {
+        console.error('Failed to copy tmux command:', err);
+        button.textContent = 'failed';
+    }
+    setTimeout(() => {
+        button.textContent = 'copy';
+        button.classList.remove('copied');
+    }, 1400);
+}
+
+async function loadPillAttachCommands(opts, target) {
+    if (!target) return;
+    try {
+        const payload = await getAgentOpsPayloadForPopover();
+        const { configuredRow, registeredRow } = findPillAttachRows(payload, opts);
+        const liveCommand = registeredRow?.attach?.live || configuredRow?.attach?.live || '';
+        const wrapperCommand = configuredRow?.attach?.wrapper || '';
+        const rows = [];
+        if (liveCommand) rows.push(renderPillAttachCommandRow('live', liveCommand));
+        if (wrapperCommand) rows.push(renderPillAttachCommandRow('wrapper', wrapperCommand));
+        target.innerHTML = rows.length
+            ? rows.join('')
+            : '<div class="pill-popover-command-empty">No tmux command available</div>';
+        target.querySelectorAll('.pill-popover-copy-btn').forEach(button => {
+            button.addEventListener('click', (e) => {
+                e.stopPropagation();
+                copyPillAttachCommand(button, button.dataset.copyCommand || '');
+            });
+        });
+    } catch (err) {
+        console.error('Failed to load agent tmux commands:', err);
+        target.innerHTML = '<div class="pill-popover-command-empty">Tmux commands unavailable</div>';
+    }
+}
+
 // --- Agent naming lightbox ---
 
 const _pendingNameQueue = [];
@@ -1171,6 +1254,12 @@ function showPillPopover(pillEl, opts) {
                 </div>
             </div>`;
         })()}
+        <div class="pill-popover-section pill-popover-tmux">
+            <label class="pill-popover-label">Tmux</label>
+            <div class="pill-popover-copy-list" data-agent-tmux-commands>
+                <div class="pill-popover-command-empty">Loading...</div>
+            </div>
+        </div>
     `;
 
     const inputEl = popover.querySelector('.pill-popover-input');
@@ -1308,6 +1397,7 @@ function showPillPopover(pillEl, opts) {
     }
 
     document.body.appendChild(popover);
+    loadPillAttachCommands(opts, popover.querySelector('[data-agent-tmux-commands]'));
 
     if (pillEl) {
         const rect = pillEl.getBoundingClientRect();
@@ -2203,7 +2293,7 @@ function renderReplyPreview() {
     }
     const truncated = replyingTo.text.length > 100 ? replyingTo.text.slice(0, 100) + '...' : replyingTo.text;
     const color = getColor(replyingTo.sender);
-    container.innerHTML = `<span class="reply-preview-label">replying to</span> <span style="color: ${color}; font-weight: 600">${escapeHtml(replyingTo.sender)}</span>: ${escapeHtml(truncated)} <button class="dismiss-btn reply-cancel" onclick="cancelReply()">&times;</button>`;
+    container.innerHTML = `<span class="reply-preview-label">replying to</span><span class="reply-preview-id">#${escapeHtml(replyingTo.id)}</span> <span style="color: ${color}; font-weight: 600">${escapeHtml(replyingTo.sender)}</span>: ${escapeHtml(truncated)} <button class="dismiss-btn reply-cancel" onclick="cancelReply()">&times;</button>`;
 }
 
 function cancelReply() {

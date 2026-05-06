@@ -1053,6 +1053,21 @@ def _tmux_sessions() -> set[str]:
     return {line.strip() for line in result.stdout.splitlines() if line.strip()}
 
 
+def _tmux_agent_session(prefix: str, base: str, slot: int | str | None = None) -> str:
+    try:
+        slot_num = int(slot or 1)
+    except (TypeError, ValueError):
+        log.warning("invalid slot %r for agent base=%r; falling back to slot 1", slot, base)
+        slot_num = 1
+    if slot_num < 1:
+        log.warning("invalid slot %r for agent base=%r; falling back to slot 1", slot, base)
+        slot_num = 1
+    suffix = str(base)
+    if slot_num > 1:
+        suffix = f"{suffix}-{slot_num}"
+    return f"{prefix}-{suffix}"
+
+
 def _agent_ops_payload() -> dict:
     now = time.time()
     project = _project_payload()
@@ -1069,7 +1084,7 @@ def _agent_ops_payload() -> dict:
 
     configured = []
     for name, cfg in configured_cfg.items():
-        live_session = f"{prefix}-{name}"
+        live_session = _tmux_agent_session(prefix, name)
         wrapper_session = f"{prefix}-wrap-{_slug(name)}"
         registered_names = registered_by_base.get(name, [])
         heartbeat_ages = [
@@ -1112,7 +1127,7 @@ def _agent_ops_payload() -> dict:
     registered_rows = []
     for name, info in registered.items():
         base = info.get("base", name)
-        live_session = f"{prefix}-{name}"
+        live_session = _tmux_agent_session(prefix, base, info.get("slot"))
         state = status.get(name, {})
         heartbeat_age = now - presence[name] if name in presence else None
         registered_rows.append({

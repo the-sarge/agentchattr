@@ -897,6 +897,7 @@ main#timeline {
     align-items: baseline;
     gap: 8px;
     margin-bottom: 6px;
+    padding-right: 42px;
 }
 
 .message:hover .chat-bubble {
@@ -1145,6 +1146,19 @@ main#timeline {
 
 .reply-sender { font-weight: 600; }
 
+.reply-message-id,
+.reply-preview-id,
+.msg-id {
+    color: var(--text-system);
+    font-size: 10px;
+    font-weight: 600;
+    opacity: 0.7;
+}
+
+.reply-message-id {
+    margin-right: 6px;
+}
+
 /* --- Reply button --- */
 
 .reply-btn {
@@ -1186,6 +1200,10 @@ main#timeline {
     font-weight: 600;
     font-size: 11px;
     text-transform: uppercase;
+    flex-shrink: 0;
+}
+
+.reply-preview-id {
     flex-shrink: 0;
 }
 
@@ -2208,6 +2226,13 @@ body.channels-in-sidebar #channel-bar {
     color: var(--text-dim);
 }
 
+.msg-id {
+    position: absolute;
+    top: 7px;
+    right: 126px;
+    white-space: nowrap;
+}
+
 .msg-sender {
     font-weight: 700;
     font-size: 13px;
@@ -3171,6 +3196,64 @@ pre:hover .code-copy-btn { opacity: 1; }
 .pill-popover-color-reset:hover {
     background: var(--white-10);
     color: var(--text);
+}
+
+/* --- Pill popover: tmux commands --- */
+.pill-popover-copy-list {
+    display: flex;
+    flex-direction: column;
+    gap: 6px;
+}
+
+.pill-popover-copy-row {
+    display: grid;
+    grid-template-columns: auto minmax(0, 1fr) auto;
+    align-items: center;
+    gap: 6px;
+    padding: 5px 6px;
+    border: 1px solid var(--border);
+    border-radius: var(--radius-md);
+    background: var(--white-04);
+}
+
+.pill-popover-copy-label {
+    color: var(--text-dim);
+    font-size: 10px;
+    font-weight: 700;
+    text-transform: uppercase;
+}
+
+.pill-popover-command {
+    min-width: 0;
+    color: var(--text-muted);
+    font-size: 10px;
+    overflow: hidden;
+    text-overflow: ellipsis;
+    white-space: nowrap;
+}
+
+.pill-popover-copy-btn {
+    background: var(--white-08);
+    border: 1px solid var(--border);
+    border-radius: var(--radius-sm);
+    color: var(--text-dim);
+    padding: 2px 6px;
+    font-family: inherit;
+    font-size: 10px;
+    font-weight: 700;
+    cursor: pointer;
+}
+
+.pill-popover-copy-btn:hover,
+.pill-popover-copy-btn.copied {
+    background: var(--white-12);
+    color: var(--text);
+}
+
+.pill-popover-command-empty {
+    color: var(--text-dim);
+    font-size: 11px;
+    padding: 3px 0;
 }
 
 /* --- Slash command hint --- */

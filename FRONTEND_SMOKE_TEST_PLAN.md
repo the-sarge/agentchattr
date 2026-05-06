@@ -16,11 +16,13 @@ message actions, attachments, sessions, schedules, or navigation.
 ## Message Actions
 
 - [ ] Send a normal text message.
-  - Expected: it appears immediately, with no console errors.
+  - Expected: it appears immediately with a dim message ID near the top right
+    of the bubble, with no console errors.
 
 - [ ] Click `reply` on that message, type a reply, and send it.
   - Expected: reply preview appears, the sent message shows a reply quote, and
-    clicking the quote scrolls to and highlights the original.
+    both the preview and quote include the original message ID. Clicking the
+    quote scrolls to and highlights the original.
 
 - [ ] Click `del` on a disposable message.
   - Expected: delete mode opens and the clicked message's radio is already
@@ -41,7 +43,18 @@ message actions, attachments, sessions, schedules, or navigation.
   - Expected: button shows copied state and clipboard gets the message content.
 
 - [ ] Click `convert to job` on a disposable message.
-  - Expected: job proposal/modal flow opens as before.
+  - Expected: job proposal/modal flow opens as before, and the hover button
+    does not cover the message ID.
+
+## Agent Sidebar
+
+- [ ] Click an agent status pill in the sidebar/header.
+  - Expected: the popup opens with rename, role, color, and tmux command copy
+    rows below the color picker.
+
+- [ ] Copy the live tmux command from that popup and attach to it in a terminal.
+  - Expected: clipboard contains a working `tmux attach -t ...` command for
+    the live agent session.
 
 ## Decision Cards
 
