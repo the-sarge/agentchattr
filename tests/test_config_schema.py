@@ -143,6 +143,98 @@ team = "1"
 
         self.assertIn("team", str(ctx.exception))
 
+    def test_invalid_routing_metadata_characters_raise(self):
+        bad = {
+            "project": {"tmux_prefix": "agentchattr-bad-route-meta"},
+            "server": {"port": 8300},
+            "agents": {
+                "builder": {
+                    "provider": "codex",
+                    "role": "Build/Review",
+                    "team": "cmx:1",
+                }
+            },
+        }
+        with self.assertRaises(config_loader.ConfigError) as ctx:
+            config_loader.validate_config(bad, source="bad-route-meta.toml", require_project=True)
+
+        msg = str(ctx.exception)
+        self.assertIn("[agents.builder].role", msg)
+        self.assertIn("[agents.builder].team", msg)
+
+    def test_repeated_routing_metadata_separators_raise(self):
+        bad = {
+            "project": {"tmux_prefix": "agentchattr-bad-route-separators"},
+            "server": {"port": 8300},
+            "agents": {
+                "builder": {
+                    "provider": "codex",
+                    "role": "Code  Review",
+                    "team": "a..b",
+                }
+            },
+        }
+        with self.assertRaises(config_loader.ConfigError) as ctx:
+            config_loader.validate_config(bad, source="bad-route-separators.toml", require_project=True)
+
+        msg = str(ctx.exception)
+        self.assertIn("[agents.builder].role", msg)
+        self.assertIn("[agents.builder].team", msg)
+
+    def test_duplicate_agent_labels_raise(self):
+        bad = {
+            "project": {"tmux_prefix": "agentchattr-duplicate-labels"},
+            "server": {"port": 8300},
+            "agents": {
+                "builder": {"provider": "codex", "label": "Worker"},
+                "reviewer": {"provider": "claude", "label": "worker"},
+            },
+        }
+        with self.assertRaises(config_loader.ConfigError) as ctx:
+            config_loader.validate_config(bad, source="duplicate-labels.toml", require_project=True)
+
+        self.assertIn("duplicates [agents.builder].label", str(ctx.exception))
+
+    def test_duplicate_agent_labels_from_defaults_raise(self):
+        bad = {
+            "project": {"tmux_prefix": "agentchattr-default-labels"},
+            "server": {"port": 8300},
+            "agent_defaults": {
+                "codex": {"label": "Worker"},
+            },
+            "agents": {
+                "builder": {"provider": "codex"},
+                "tester": {"provider": "codex"},
+            },
+        }
+        with self.assertRaises(config_loader.ConfigError) as ctx:
+            config_loader.validate_config(bad, source="default-labels.toml", require_project=True)
+
+        self.assertIn("duplicates [agents.builder].label", str(ctx.exception))
+
+    def test_agent_defaults_validate_label_team_and_cwd(self):
+        bad = {
+            "project": {"tmux_prefix": "agentchattr-bad-defaults"},
+            "server": {"port": 8300},
+            "agent_defaults": {
+                "codex": {
+                    "label": "",
+                    "team": "cmx/1",
+                    "cwd": "",
+                },
+            },
+            "agents": {
+                "builder": {"provider": "codex"},
+            },
+        }
+        with self.assertRaises(config_loader.ConfigError) as ctx:
+            config_loader.validate_config(bad, source="bad-defaults.toml", require_project=True)
+
+        msg = str(ctx.exception)
+        self.assertIn("[agent_defaults.codex].label", msg)
+        self.assertIn("[agent_defaults.codex].team", msg)
+        self.assertIn("[agent_defaults.codex].cwd", msg)
+
     def test_invalid_project_urls_raise(self):
         bad = {
             "project": {

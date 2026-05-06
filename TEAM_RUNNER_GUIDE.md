@@ -34,6 +34,7 @@ Edit ports, paths, and agents as needed, then start it:
 ```bash
 ./ac list
 ./ac two-agent up --dry-run
+./ac two-agent check
 ./ac two-agent up
 ```
 
@@ -144,6 +145,7 @@ Common fields:
 - `color`: status pill and mention color
 - `label`: display label in the UI
 - `role`: role text injected into the agent when it is triggered
+- `team`: optional group label used by the UI and `@team:<name>` routing
 - `args`: extra provider CLI arguments appended after agentchattr-owned MCP
   arguments and before ad hoc wrapper pass-through arguments
 
@@ -175,6 +177,38 @@ label = "Codex Builder"
 ```
 
 Per-agent values override matching `[agent_defaults.<provider>]` values.
+
+## Validation And Dry Runs
+
+Preview a project without starting tmux sessions:
+
+```bash
+./ac project-a up --dry-run
+```
+
+The dry run prints the team file, ports, data paths, tmux session names, and
+commands that would be used.
+
+Run the full preflight before launch:
+
+```bash
+./ac project-a check
+```
+
+`check` validates:
+
+- team file structure
+- duplicate ports and tmux prefixes across known `teams/*.toml` and
+  `projects/*.toml` files
+- missing agent commands
+- data/upload paths that point at files
+- missing or non-directory agent `cwd` values
+
+Team labels must be unique, and `role` / `team` values must use letters,
+numbers, and single spaces, dots, underscores, or hyphens so `@role:<name>`
+and `@team:<name>` routing can address them reliably. For values with spaces,
+mention the normalized hyphen form, for example `role = "Code Review"` is
+addressed as `@role:Code-Review`.
 
 ## Multiple Projects
 
@@ -324,6 +358,13 @@ View server output:
 ./ac project-a logs server
 ```
 
+If the server crashes before its tmux session stays alive, inspect the persisted
+server log instead:
+
+```bash
+tail -n 120 data/project-a/server.log
+```
+
 View wrapper output:
 
 ```bash
@@ -349,8 +390,9 @@ process or change the project’s ports.
 
 ## Docker Notes
 
-The current `./ac` workflow is host/tmux based. Docker can work later, but if
-you put server and agents in a container, mount persistent directories for:
+The current `./ac` workflow is host/tmux based. Docker is intentionally
+postponed until the runner/preflight path is stable. When Docker work resumes,
+mount persistent directories for:
 
 ```text
 data_dir

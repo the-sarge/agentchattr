@@ -32,6 +32,7 @@ PROJECT_CONFIG_ENV = "AGENTCHATTR_PROJECT_CONFIG"
 TMUX_PREFIX_ENV = "AGENTCHATTR_TMUX_PREFIX"
 MAX_ROLE_LEN = 20
 MAX_TEAM_LEN = 32
+MAX_LABEL_LEN = 40
 
 
 class ConfigError(ValueError):
@@ -50,6 +51,7 @@ _PROVIDER_COMMANDS = {
 _KNOWN_PROVIDERS = set(_PROVIDER_COMMANDS)
 _HEX_COLOR_RE = re.compile(r"^#[0-9a-fA-F]{6}$")
 _AGENT_NAME_RE = re.compile(r"^[A-Za-z0-9][A-Za-z0-9_-]{0,63}$")
+_ROUTING_METADATA_RE = re.compile(r"^[A-Za-z0-9]+(?:[ ._-][A-Za-z0-9]+)*$")
 
 
 # Mapping: env var name → (config section, key, is_int)
@@ -212,6 +214,32 @@ def _validate_color(value, label: str, errors: list[str]) -> None:
         errors.append(f"{label} must be a #RRGGBB hex color")
 
 
+def _validate_label(value, label: str, errors: list[str]) -> None:
+    if value is None:
+        return
+    if not isinstance(value, str):
+        errors.append(f"{label} must be a string")
+    elif not value.strip():
+        errors.append(f"{label} must be a non-empty string")
+    elif len(value.strip()) > MAX_LABEL_LEN:
+        errors.append(f"{label} must be {MAX_LABEL_LEN} characters or fewer")
+
+
+def _validate_routing_metadata(value, label: str, max_len: int, errors: list[str]) -> None:
+    if value is None:
+        return
+    if not isinstance(value, str):
+        errors.append(f"{label} must be a string")
+        return
+    stripped = value.strip()
+    if not stripped:
+        return
+    if len(stripped) > max_len:
+        errors.append(f"{label} must be {max_len} characters or fewer")
+    elif not _ROUTING_METADATA_RE.match(stripped):
+        errors.append(f"{label} must use letters, numbers, and single spaces, dots, underscores, or hyphens")
+
+
 def _validate_http_url(value, label: str, errors: list[str]) -> None:
     if value is None:
         return
@@ -248,20 +276,20 @@ def _validate_agent(name: str, cfg, errors: list[str]) -> None:
             errors.append(f"[agents.{name}].base_url is required for API agents")
 
     _validate_color(cfg.get("color"), f"[agents.{name}].color", errors)
+    _validate_label(cfg.get("label"), f"[agents.{name}].label", errors)
+
+    cwd = cfg.get("cwd")
+    if cwd is not None:
+        if not isinstance(cwd, str):
+            errors.append(f"[agents.{name}].cwd must be a string")
+        elif not cwd.strip():
+            errors.append(f"[agents.{name}].cwd must be a non-empty string")
 
     role = cfg.get("role")
-    if role is not None:
-        if not isinstance(role, str):
-            errors.append(f"[agents.{name}].role must be a string")
-        elif len(role.strip()) > MAX_ROLE_LEN:
-            errors.append(f"[agents.{name}].role must be {MAX_ROLE_LEN} characters or fewer")
+    _validate_routing_metadata(role, f"[agents.{name}].role", MAX_ROLE_LEN, errors)
 
     team = cfg.get("team")
-    if team is not None:
-        if not isinstance(team, str):
-            errors.append(f"[agents.{name}].team must be a string")
-        elif len(team.strip()) > MAX_TEAM_LEN:
-            errors.append(f"[agents.{name}].team must be {MAX_TEAM_LEN} characters or fewer")
+    _validate_routing_metadata(team, f"[agents.{name}].team", MAX_TEAM_LEN, errors)
 
     args = cfg.get("args")
     if args is not None:
@@ -287,15 +315,55 @@ def _validate_agent_defaults(config: dict, errors: list[str]) -> None:
         if command is not None and (not isinstance(command, str) or not command.strip()):
             errors.append(f"[agent_defaults.{provider}].command must be a non-empty string")
         _validate_color(cfg.get("color"), f"[agent_defaults.{provider}].color", errors)
-        role = cfg.get("role")
-        if role is not None:
-            if not isinstance(role, str):
-                errors.append(f"[agent_defaults.{provider}].role must be a string")
-            elif len(role.strip()) > MAX_ROLE_LEN:
-                errors.append(f"[agent_defaults.{provider}].role must be {MAX_ROLE_LEN} characters or fewer")
+        _validate_label(cfg.get("label"), f"[agent_defaults.{provider}].label", errors)
+        _validate_routing_metadata(cfg.get("role"), f"[agent_defaults.{provider}].role", MAX_ROLE_LEN, errors)
+        _validate_routing_metadata(cfg.get("team"), f"[agent_defaults.{provider}].team", MAX_TEAM_LEN, errors)
+        cwd = cfg.get("cwd")
+        if cwd is not None:
+            if not isinstance(cwd, str):
+                errors.append(f"[agent_defaults.{provider}].cwd must be a string")
+            elif not cwd.strip():
+                errors.append(f"[agent_defaults.{provider}].cwd must be a non-empty string")
         args = cfg.get("args")
         if args is not None and (not isinstance(args, list) or any(not isinstance(arg, str) for arg in args)):
             errors.append(f"[agent_defaults.{provider}].args must be a list of strings")
+
+
+def _validate_duplicate_agent_labels(agents: dict, errors: list[str]) -> None:
+    labels: dict[str, str] = {}
+    for name, cfg in agents.items():
+        if not isinstance(cfg, dict):
+            continue
+        raw = cfg.get("label")
+        if not isinstance(raw, str) or not raw.strip():
+            continue
+        key = raw.strip().casefold()
+        if key in labels:
+            errors.append(
+                f"[agents.{name}].label duplicates [agents.{labels[key]}].label: {raw.strip()!r}"
+            )
+        else:
+            labels[key] = str(name)
+
+
+def _agents_with_effective_defaults(config: dict, agents: dict) -> dict:
+    defaults = config.get("agent_defaults", {})
+    if not isinstance(defaults, dict):
+        defaults = {}
+    effective = {}
+    for name, cfg in agents.items():
+        if not isinstance(cfg, dict):
+            effective[name] = cfg
+            continue
+        provider = str(cfg.get("provider", "")).strip().lower()
+        if not provider and str(cfg.get("type", "")).strip().lower() == "api":
+            provider = "api"
+        provider_defaults = defaults.get(provider)
+        if isinstance(provider_defaults, dict):
+            effective[name] = {**provider_defaults, **cfg}
+        else:
+            effective[name] = cfg
+    return effective
 
 
 def validate_config(
@@ -350,6 +418,7 @@ def validate_config(
     else:
         for name, cfg in agents.items():
             _validate_agent(str(name), cfg, errors)
+        _validate_duplicate_agent_labels(_agents_with_effective_defaults(config, agents), errors)
 
     _validate_agent_defaults(config, errors)
 
