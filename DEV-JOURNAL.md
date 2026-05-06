@@ -482,3 +482,69 @@ even when the target message is not mounted in the current chat DOM.
    allowlist changes.
 3. Move to the next runner/ops polish slice: one-agent restart, richer logs,
    and status output alignment with Agent Operations.
+
+---
+
+## 2026-05-06 02:37 EDT - Runner Ops Status And Logs Closeout
+
+**Branch:** `main`
+**Base Commit:** `52bd097`
+**Commits:** `e73ae17`
+
+### Summary
+
+Closed the runner status/logs alignment slice. The `./ac` runner now reports
+service and agent states in the same operational vocabulary as Agent
+Operations, and `./ac <project> logs server` can read the persisted
+`data_dir/server.log` even when the server tmux pane has already exited.
+
+### Decisions
+
+- Prefer persisted server logs for `logs server` so startup crashes remain
+  diagnosable after tmux sessions disappear.
+- Keep `./ac status` based on local tmux and port probes for now instead of
+  requiring a live server API response.
+- Treat `wrapper only` and `live only` as first-class CLI agent states because
+  they point to different recovery actions.
+- Keep richer heartbeat, busy, and registered-vs-configured details as future
+  Agent Operations and runner convergence work.
+
+### Changes
+
+- Added runner helpers for server/MCP host lookup, probe-host normalization,
+  host/port checks, persisted-log tailing, and service/agent state calculation.
+- Updated `./ac <project> logs server` to read `data_dir/server.log` before
+  falling back to tmux capture, including a clear empty-log message.
+- Added a missing-live-session hint that points users to
+  `./ac <project> logs wrapper:<agent>` when wrapper output is the useful path.
+- Reworked `./ac <project> status` into Services, Agents, and Warnings sections
+  with `running`, `listening`, `tmux only`, `wrapper only`, `live only`, and
+  `stopped` states.
+- Updated README, `TEAM_RUNNER_GUIDE.md`, and `PROJECT_PLAN.md` for persisted
+  logs and the aligned status output.
+
+### Verification
+
+- Ran `python -m py_compile ac`.
+- Ran `.venv/bin/python -m pytest tests/test_ac_runner.py -q`; latest validation
+  passed `13` tests.
+- Ran `.venv/bin/python -m pytest -q`; latest validation passed `115` tests
+  plus `4` subtests.
+- Ran `git diff --check`.
+
+### Open Questions
+
+- Whether `./ac status` should query `/api/agent-ops` when the server is
+  listening so CLI output can include heartbeat, busy, and registered-vs-configured
+  details.
+- Whether `./ac logs` should eventually support an explicit source selection
+  such as persisted, tmux, or both when those outputs diverge.
+- Whether Agent Operations should surface `wrapper only` and `live only` as
+  visible states instead of only mismatch warnings.
+
+### Next Steps
+
+1. Start the runner restart/recovery ergonomics PR.
+2. Consider API-backed `./ac status` detail when the server is reachable.
+3. Smoke test persisted server logs after a forced startup crash and status
+   output with wrapper-only and live-only sessions.
