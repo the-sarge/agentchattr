@@ -3,14 +3,18 @@ set -eu
 
 ROOT=$(CDPATH= cd -- "$(dirname -- "$0")" && pwd)
 
-if ! command -v uv >/dev/null 2>&1; then
+if ! command -v go >/dev/null 2>&1; then
     cat >&2 <<'EOF'
-agentchattr requires uv.
+agentchattr ac requires Go.
 
-Install uv, then retry:
-  https://docs.astral.sh/uv/getting-started/installation/
+Install Go, then retry:
+  https://go.dev/doc/install
+
+Python fallback:
+  ./ac-python ...
 EOF
     exit 1
 fi
 
-exec uv run --no-sync --project "$ROOT" python "$ROOT/ac.py" "$@"
+cd "$ROOT"
+exec go run ./cmd/ac "$@"

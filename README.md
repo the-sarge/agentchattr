@@ -13,8 +13,6 @@ CLIs or OpenAI-compatible model APIs. When someone mentions an agent in chat,
 agentchattr wakes that agent, points it at the right channel or job, and lets
 the agent respond through MCP.
 
-![screenshot](screenshot.png)
-
 ## What Runs
 
 An agentchattr room has three moving parts:
@@ -44,6 +42,7 @@ There are two normal ways to run it:
 ## Requirements
 
 - `uv`
+- Go 1.24 or newer for the `./ac` project runner
 - Python 3.11 or newer, managed by `uv`
 - At least one supported agent CLI on `PATH`, or an OpenAI-compatible API
   endpoint
@@ -144,8 +143,9 @@ with the underlying agent running tools without interactive confirmation.
 
 ## Project Rooms With `./ac`
 
-`./ac` is the project/team runner. It is intended for macOS/Linux because it
-uses `tmux` to keep the server, wrappers, and live agent terminals organized.
+`./ac` is the Go/Cobra project/team runner. It is intended for macOS/Linux
+because it uses `tmux` to keep the server, wrappers, and live agent terminals
+organized. The previous Python runner remains available as `./ac-python`.
 
 Create a team file:
 
@@ -438,8 +438,10 @@ Important files:
 | `rules.py` | Rules persistence |
 | `session_engine.py` | Structured session orchestration |
 | `config_loader.py` | Config merge, overrides, and validation |
-| `ac.py` | Project/team runner implementation |
-| `ac` | uv shim for `ac.py` |
+| `cmd/ac` | Go/Cobra project/team runner implementation |
+| `ac` | Go runner shim |
+| `ac.py` | Python project/team runner fallback |
+| `ac-python` | uv shim for `ac.py` |
 
 ## Security Model
 
@@ -506,6 +508,7 @@ Run checks through `uv`:
 ```bash
 uv run --project . python -m pytest -q
 uv run --project . python -m py_compile ac.py build_release.py config_loader.py
+go test ./...
 ```
 
 Build a release archive:
