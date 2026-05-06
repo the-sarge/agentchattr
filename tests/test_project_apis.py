@@ -190,6 +190,34 @@ class ProjectApiPayloadTests(unittest.TestCase):
         self.assertEqual(builder["registered_names"], ["builder"])
         self.assertIn("tmux attach -t agentchattr-demo-builder", builder["attach"]["live"])
 
+    def test_agent_ops_prefers_existing_legacy_live_session_for_default_prefix(self):
+        app.config = {
+            "project": {"name": "agentchattr"},
+            "server": {"port": 8300, "host": "127.0.0.1", "data_dir": "./data/demo"},
+            "mcp": {"http_port": 8200, "sse_port": 8201},
+            "images": {"upload_dir": "./uploads/demo"},
+            "agents": {
+                "claude": {"provider": "claude", "label": "Claude", "color": "#da7756"},
+            },
+        }
+        with tempfile.TemporaryDirectory() as tmp:
+            registry = RuntimeRegistry(data_dir=tmp)
+            registry.seed(app.config["agents"])
+            registry.register("claude")
+            app.registry = registry
+            app.agents = AgentTrigger(registry, data_dir=tmp)
+
+            with mock.patch.object(app, "_tmux_sessions", return_value={"agentchattr-claude"}):
+                payload = app._agent_ops_payload()
+
+        configured = next(row for row in payload["configured_agents"] if row["name"] == "claude")
+        registered = next(row for row in payload["registered_agents"] if row["name"] == "claude")
+        self.assertEqual(payload["project"]["tmux_prefix"], "agentchattr-agentchattr")
+        self.assertEqual(configured["tmux"]["live_session"], "agentchattr-claude")
+        self.assertEqual(configured["attach"]["live"], "tmux attach -t agentchattr-claude")
+        self.assertEqual(configured["attach"]["wrapper"], "")
+        self.assertEqual(registered["tmux"]["live_session"], "agentchattr-claude")
+
     def test_agent_ops_registered_attach_uses_original_tmux_slot_after_rename(self):
         app.config = {
             "project": {"name": "demo", "tmux_prefix": "agentchattr-demo"},
@@ -246,6 +274,10 @@ class ProjectApiPayloadTests(unittest.TestCase):
 
     def test_tmux_agent_session_preserves_base_name_and_warns_on_bad_slot(self):
         self.assertEqual(app._tmux_agent_session("prefix", "Builder Name"), "prefix-Builder Name")
+        self.assertEqual(
+            app._tmux_agent_session("agentchattr", "agentchattr-claude", sessions={"agentchattr-claude"}),
+            "agentchattr-claude",
+        )
         with self.assertLogs(app.log, level="WARNING") as captured:
             session = app._tmux_agent_session("prefix", "builder", "bad")
 

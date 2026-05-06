@@ -1053,7 +1053,12 @@ def _tmux_sessions() -> set[str]:
     return {line.strip() for line in result.stdout.splitlines() if line.strip()}
 
 
-def _tmux_agent_session(prefix: str, base: str, slot: int | str | None = None) -> str:
+def _tmux_agent_session(
+    prefix: str,
+    base: str,
+    slot: int | str | None = None,
+    sessions: set[str] | None = None,
+) -> str:
     try:
         slot_num = int(slot or 1)
     except (TypeError, ValueError):
@@ -1065,7 +1070,18 @@ def _tmux_agent_session(prefix: str, base: str, slot: int | str | None = None) -
     suffix = str(base)
     if slot_num > 1:
         suffix = f"{suffix}-{slot_num}"
-    return f"{prefix}-{suffix}"
+    predicted = f"{prefix}-{suffix}"
+    if not sessions:
+        return predicted
+
+    candidates = [predicted, suffix]
+    legacy = f"agentchattr-{suffix}"
+    if legacy not in candidates:
+        candidates.append(legacy)
+    for candidate in candidates:
+        if candidate in sessions:
+            return candidate
+    return predicted
 
 
 def _agent_ops_payload() -> dict:
@@ -1084,7 +1100,7 @@ def _agent_ops_payload() -> dict:
 
     configured = []
     for name, cfg in configured_cfg.items():
-        live_session = _tmux_agent_session(prefix, name)
+        live_session = _tmux_agent_session(prefix, name, sessions=sessions)
         wrapper_session = f"{prefix}-wrap-{_slug(name)}"
         registered_names = registered_by_base.get(name, [])
         heartbeat_ages = [
@@ -1116,7 +1132,7 @@ def _agent_ops_payload() -> dict:
             },
             "attach": {
                 "live": f"tmux attach -t {shlex.quote(live_session)}",
-                "wrapper": f"tmux attach -t {shlex.quote(wrapper_session)}",
+                "wrapper": f"tmux attach -t {shlex.quote(wrapper_session)}" if wrapper_running else "",
             },
             "mismatches": {
                 "configured_not_registered": not registered_names,
@@ -1127,7 +1143,7 @@ def _agent_ops_payload() -> dict:
     registered_rows = []
     for name, info in registered.items():
         base = info.get("base", name)
-        live_session = _tmux_agent_session(prefix, base, info.get("slot"))
+        live_session = _tmux_agent_session(prefix, base, info.get("slot"), sessions=sessions)
         state = status.get(name, {})
         heartbeat_age = now - presence[name] if name in presence else None
         registered_rows.append({

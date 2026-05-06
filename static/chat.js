@@ -1057,7 +1057,7 @@ async function loadPillAttachCommands(opts, target) {
         const payload = await getAgentOpsPayloadForPopover();
         const { configuredRow, registeredRow } = findPillAttachRows(payload, opts);
         const liveCommand = registeredRow?.attach?.live || configuredRow?.attach?.live || '';
-        const wrapperCommand = configuredRow?.attach?.wrapper || '';
+        const wrapperCommand = configuredRow?.tmux?.wrapper_running ? (configuredRow?.attach?.wrapper || '') : '';
         const rows = [];
         if (liveCommand) rows.push(renderPillAttachCommandRow('live', liveCommand));
         if (wrapperCommand) rows.push(renderPillAttachCommandRow('wrapper', wrapperCommand));
