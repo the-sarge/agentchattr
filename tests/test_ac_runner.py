@@ -131,6 +131,26 @@ args = ["--quiet"]
         check_tmux.assert_not_called()
         self.assertEqual(buf.getvalue().strip(), "two\nthree")
 
+    def test_logs_server_reports_empty_persisted_log(self):
+        args = types.SimpleNamespace(project="demo", file="/tmp/demo.toml", target="server", lines=2)
+        with tempfile.TemporaryDirectory() as tmp:
+            log_path = Path(tmp) / "server.log"
+            log_path.write_text("", "utf-8")
+            team = {
+                "project": {"name": "demo", "tmux_prefix": "agentchattr-demo"},
+                "server": {"port": 8390, "data_dir": tmp},
+                "agents": {"builder": {"command": "python"}},
+            }
+
+            with mock.patch.object(self.ac, "_project_context", return_value=(Path("/tmp/demo.toml"), team, "demo", "agentchattr-demo", 8390, ["builder"])), \
+                    mock.patch.object(self.ac, "_check_tmux") as check_tmux:
+                buf = io.StringIO()
+                with redirect_stdout(buf):
+                    self.ac.logs(args)
+
+        check_tmux.assert_not_called()
+        self.assertIn("(server log is empty:", buf.getvalue())
+
     def test_logs_missing_live_agent_hints_at_wrapper_logs(self):
         args = types.SimpleNamespace(project="demo", file="/tmp/demo.toml", target="builder", lines=50)
         team = {"project": {"name": "demo", "tmux_prefix": "agentchattr-demo"}, "server": {"port": 8390}, "agents": {"builder": {"command": "python"}}}

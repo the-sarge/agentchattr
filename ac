@@ -505,6 +505,8 @@ def logs(args) -> None:
             out = _tail_file(log_path, lines)
             if out:
                 print(out)
+            else:
+                print(f"(server log is empty: {log_path})")
             return
 
     _check_tmux()
