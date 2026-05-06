@@ -30,6 +30,32 @@
         return /^#[0-9a-fA-F]{6}$/.test(String(color || ''));
     }
 
+    function rowTeam(row) {
+        return String(row?.team || '').trim();
+    }
+
+    function rowLabel(row) {
+        return String(row?.label || row?.name || '').trim();
+    }
+
+    function compareAgentRows(a, b) {
+        const teamA = rowTeam(a);
+        const teamB = rowTeam(b);
+        if (teamA || teamB) {
+            if (!teamA) return 1;
+            if (!teamB) return -1;
+            const teamCmp = teamA.localeCompare(teamB, undefined, { numeric: true, sensitivity: 'base' });
+            if (teamCmp) return teamCmp;
+        }
+        const labelCmp = rowLabel(a).localeCompare(rowLabel(b), undefined, { numeric: true, sensitivity: 'base' });
+        if (labelCmp) return labelCmp;
+        return String(a?.name || '').localeCompare(String(b?.name || ''), undefined, { numeric: true, sensitivity: 'base' });
+    }
+
+    function sortedAgentRows(rows) {
+        return [...rows].sort(compareAgentRows);
+    }
+
     async function loadJson(path) {
         const resp = await fetch(path, { headers: authHeaders() });
         if (!resp.ok) throw new Error(`${path} ${resp.status}`);
@@ -143,7 +169,7 @@
 
     function renderConfiguredAgents(rows) {
         if (!rows.length) return section('Configured Agents', '<div class="agent-ops-empty">No configured agents.</div>');
-        return section('Configured Agents', rows.map(renderConfiguredAgent).join(''));
+        return section('Configured Agents', sortedAgentRows(rows).map(renderConfiguredAgent).join(''));
     }
 
     function renderConfiguredAgent(row) {
@@ -152,6 +178,7 @@
         const state = row.busy ? 'busy' : row.online ? 'online' : warn ? 'warn' : '';
         const provider = row.provider || row.type || 'agent';
         const role = row.role ? `<span class="agent-ops-tag">role ${escapeHtml(row.role)}</span>` : '<span class="agent-ops-tag">no role</span>';
+        const team = row.team ? `<span class="agent-ops-tag">team ${escapeHtml(row.team)}</span>` : '';
         const registered = (row.registered_names || []).length
             ? `<span class="agent-ops-tag">@${escapeHtml(row.registered_names.join(', @'))}</span>`
             : '<span class="agent-ops-tag">not registered</span>';
@@ -169,6 +196,7 @@
                 <div class="agent-ops-tags">
                     <span class="agent-ops-tag">@${escapeHtml(row.name)}</span>
                     <span class="agent-ops-tag">${escapeHtml(provider)}</span>
+                    ${team}
                     ${role}
                     ${registered}
                 </div>
@@ -180,9 +208,10 @@
 
     function renderRegisteredAgents(rows) {
         if (!rows.length) return section('Running Agents', '<div class="agent-ops-empty">No registered agents.</div>');
-        return section('Running Agents', rows.map(row => {
+        return section('Running Agents', sortedAgentRows(rows).map(row => {
             const warn = row.mismatches?.registered_not_configured;
             const state = row.busy ? 'busy' : row.online ? 'online' : warn ? 'warn' : '';
+            const team = row.team ? `<span class="agent-ops-tag">team ${escapeHtml(row.team)}</span>` : '';
             return `
                 <div class="agent-ops-row ${warn ? 'warn' : ''}">
                     <div class="agent-ops-row-top">
@@ -195,6 +224,7 @@
                     <div class="agent-ops-tags">
                         <span class="agent-ops-tag">@${escapeHtml(row.name)}</span>
                         <span class="agent-ops-tag">base ${escapeHtml(row.base)}</span>
+                        ${team}
                         <span class="agent-ops-tag">${escapeHtml(row.state || 'active')}</span>
                     </div>
                     ${copyRow('Live', row.attach?.live || '')}

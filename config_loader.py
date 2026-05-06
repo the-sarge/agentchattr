@@ -31,6 +31,7 @@ ROOT = Path(__file__).parent
 PROJECT_CONFIG_ENV = "AGENTCHATTR_PROJECT_CONFIG"
 TMUX_PREFIX_ENV = "AGENTCHATTR_TMUX_PREFIX"
 MAX_ROLE_LEN = 20
+MAX_TEAM_LEN = 32
 
 
 class ConfigError(ValueError):
@@ -254,6 +255,13 @@ def _validate_agent(name: str, cfg, errors: list[str]) -> None:
             errors.append(f"[agents.{name}].role must be a string")
         elif len(role.strip()) > MAX_ROLE_LEN:
             errors.append(f"[agents.{name}].role must be {MAX_ROLE_LEN} characters or fewer")
+
+    team = cfg.get("team")
+    if team is not None:
+        if not isinstance(team, str):
+            errors.append(f"[agents.{name}].team must be a string")
+        elif len(team.strip()) > MAX_TEAM_LEN:
+            errors.append(f"[agents.{name}].team must be {MAX_TEAM_LEN} characters or fewer")
 
     args = cfg.get("args")
     if args is not None:

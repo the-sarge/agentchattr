@@ -24,6 +24,7 @@ class Instance:
     slot: int       # 1, 2, 3...
     label: str      # "Gemini", "Gemini 2", or human-set custom
     color: str      # hex color (derived from base + slot)
+    team: str = ""
     identity_id: str = field(default_factory=lambda: uuid.uuid4().hex)
     token: str = field(default_factory=lambda: secrets.token_hex(16))
     epoch: int = 1
@@ -126,6 +127,7 @@ class RuntimeRegistry:
                     slot1.name = new_s1_name
                     base_cfg = self._bases[base]
                     slot1.label = f"{base_cfg.get('label', base.capitalize())} 1"
+                    slot1.team = str(base_cfg.get("team", "")).strip()
                     # Color stays the same (slot 1 = base color)
                     self._instances[new_s1_name] = slot1
                     self._renames[base] = new_s1_name
@@ -134,6 +136,7 @@ class RuntimeRegistry:
             name = base if slot == 1 else f"{base}-{slot}"
             base_cfg = self._bases[base]
             color = _derive_color(base_cfg.get("color", "#888"), slot)
+            team = str(base_cfg.get("team", "")).strip()
 
             if label:
                 lbl = label
@@ -146,7 +149,7 @@ class RuntimeRegistry:
             # recovery/reclaim still uses chat_claim, but normal startup should
             # not block on a manual confirmation step.
             state = "active"
-            inst = Instance(name=name, base=base, slot=slot, label=lbl, color=color, state=state)
+            inst = Instance(name=name, base=base, slot=slot, label=lbl, color=color, team=team, state=state)
             self._instances[name] = inst
             result = _inst_dict(inst, include_token=True)
             if renamed_slot1:
@@ -388,10 +391,10 @@ class RuntimeRegistry:
             return {n: _inst_dict(i) for n, i in self._instances.items()}
 
     def get_agent_config(self) -> dict[str, dict]:
-        """For WebSocket 'agents' message: {name: {color, label, base, state}}."""
+        """For WebSocket 'agents' message: {name: {color, label, base, team, state}}."""
         with self._lock:
             return {
-                n: {"color": i.color, "label": i.label, "base": i.base, "state": i.state}
+                n: {"color": i.color, "label": i.label, "base": i.base, "team": i.team, "state": i.state}
                 for n, i in self._instances.items()
             }
 
@@ -568,7 +571,7 @@ def _inst_dict(inst: Instance, include_token: bool = False) -> dict:
     d = {
         "identity_id": inst.identity_id,
         "name": inst.name, "base": inst.base, "slot": inst.slot,
-        "label": inst.label, "color": inst.color, "state": inst.state,
+        "label": inst.label, "color": inst.color, "team": inst.team, "state": inst.state,
         "epoch": inst.epoch,
         "registered_at": inst.registered_at,
     }

@@ -1119,6 +1119,7 @@ def _agent_ops_payload() -> dict:
             "command": cfg.get("command", ""),
             "type": cfg.get("type", "cli"),
             "role": cfg.get("role", ""),
+            "team": str(cfg.get("team", "")).strip(),
             "color": cfg.get("color", "#888"),
             "registered_names": registered_names,
             "online": bool(online),
@@ -1151,6 +1152,7 @@ def _agent_ops_payload() -> dict:
             "base": base,
             "label": info.get("label", state.get("label", name)),
             "role": state.get("role", ""),
+            "team": str(info.get("team", "")).strip(),
             "color": info.get("color", state.get("color", "#888")),
             "state": info.get("state", ""),
             "online": bool(state.get("available")),
@@ -1233,7 +1235,10 @@ async def websocket_endpoint(websocket: WebSocket):
     # Send base agent colors (used for message coloring, no pills)
     base_colors = {}
     for name, cfg in config.get("agents", {}).items():
-        base_colors[name] = {"color": cfg.get("color", "#888"), "label": cfg.get("label", name)}
+        base_colors[name] = {
+            "color": cfg.get("color", "#888"),
+            "label": cfg.get("label", name),
+        }
     await websocket.send_text(json.dumps({"type": "base_colors", "data": base_colors}))
 
     # Send todos {msg_id: status}
