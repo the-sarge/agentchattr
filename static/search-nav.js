@@ -436,8 +436,12 @@
             const id = item.dataset.id;
             const channel = item.dataset.channel || 'general';
             closeSearchNav();
-            if (window.activeChannel !== channel) window.switchChannel?.(channel);
-            setTimeout(() => window.scrollToMessage?.(id), 120);
+            if (typeof window.navigateToMessage === 'function') {
+                window.navigateToMessage(id, channel);
+            } else {
+                if (window.activeChannel !== channel) window.switchChannel?.(channel);
+                setTimeout(() => window.scrollToMessage?.(id), 120);
+            }
         }
     }
 

@@ -201,6 +201,9 @@ class ProjectApiPayloadTests(unittest.TestCase):
 
         self.assertIn("reviewer", payload["mismatches"]["configured_not_registered"])
         self.assertIn("reviewer", payload["mismatches"]["wrapper_running_without_live_heartbeat"])
+        detail_kinds = {item["kind"] for item in payload["mismatches"]["details"]}
+        self.assertIn("configured_not_registered", detail_kinds)
+        self.assertIn("wrapper_running_without_live_heartbeat", detail_kinds)
         builder = next(row for row in payload["configured_agents"] if row["name"] == "builder")
         self.assertTrue(builder["online"])
         self.assertTrue(builder["busy"])
@@ -240,6 +243,44 @@ class ProjectApiPayloadTests(unittest.TestCase):
         self.assertEqual(rows["builder-2"]["team"], "1")
         self.assertEqual(app.registry.get_agent_config()["builder-1"]["team"], "1")
         self.assertEqual(app.registry.get_agent_config()["builder-2"]["team"], "1")
+
+    def test_agent_ops_service_badges_report_ports_and_loop_guard(self):
+        saved_room_settings = dict(app.room_settings)
+        try:
+            app.room_settings = {
+                **saved_room_settings,
+                "channels": ["general", "debug"],
+                "max_agent_hops": 3,
+            }
+            app.config = {
+                "project": {"name": "demo", "tmux_prefix": "agentchattr-demo"},
+                "server": {"port": 8390, "host": "127.0.0.1", "data_dir": "./data/demo"},
+                "mcp": {"http_port": 8290, "sse_port": 8291},
+                "images": {"upload_dir": "./uploads/demo"},
+                "agents": {},
+            }
+            app.registry = RuntimeRegistry(data_dir="./data/test")
+            app.agents = AgentTrigger(app.registry, data_dir="./data/test")
+            app.router = Router([], max_hops=3)
+            app.router._get_ch("debug")["paused"] = True
+
+            def port_open(_host, port, timeout=0.08):
+                return int(port) in {8390, 8290}
+
+            with mock.patch.object(app, "_tmux_sessions", return_value={"agentchattr-demo-server"}), \
+                    mock.patch.object(app, "_tcp_port_open", side_effect=port_open):
+                payload = app._agent_ops_payload()
+        finally:
+            app.room_settings = saved_room_settings
+
+        services = {svc["name"]: svc for svc in payload["service_badges"]}
+        self.assertEqual(services["server"]["status"], "running")
+        self.assertEqual(services["server"]["severity"], "ok")
+        self.assertEqual(services["mcp-http"]["status"], "listening")
+        self.assertEqual(services["mcp-sse"]["status"], "closed")
+        self.assertEqual(services["mcp-sse"]["severity"], "warn")
+        self.assertEqual(services["loop-guard"]["status"], "paused")
+        self.assertEqual(services["loop-guard"]["paused_channels"], ["debug"])
 
     def test_sync_router_agents_includes_team_and_role_metadata(self):
         app.config = {

@@ -115,6 +115,8 @@ Agents wake each other up, coordinate, and report back.
 ### Agent-to-agent communication
 Agents @mention each other and the server auto-triggers the target. Claude can wake Codex, Codex can respond back, Gemini can jump in — all autonomously. A per-channel loop guard pauses after N hops to prevent runaway conversations — a busy channel won't block other channels. Human @mentions always pass through, even when the loop guard is active. Type `/continue` to resume.
 
+Mention a specific agent by handle, for example `@builder`. Project teams also support group routing: `@team:1` routes to matching agents configured with `team = "1"`, and `@role:Builder` routes to agents whose current role is `Builder`. Mentions inside inline code or fenced code blocks, such as `` `@team:1` ``, are treated as documentation and do not trigger agents.
+
 ### Channels
 Conversations are organized into channels (like Slack). The default channel is `#general`. Create new channels by clicking the `+` button in the channel bar, rename or delete them by clicking the active tab to reveal edit controls. Channels persist across server restarts.
 
@@ -123,10 +125,10 @@ Agents interact with channels via MCP: `chat_send(channel="debug")`, `chat_read(
 When agents are triggered by an @mention, the wrapper injects `use mcp to read #channel-name - you're mentioned, take appropriate action and respond` so the agent reads the right channel automatically. Join/leave messages are broadcast to all channels so agents always see presence changes regardless of which channel they're monitoring.
 
 ### Search and command palette
-Open search from the header or press `Cmd/Ctrl+K`. Search project message history across channels, filter by sender/channel/pinned/todo/done/jobs/session/system messages, switch channels, open Jobs/Rules/Agent Operations, copy tmux attach commands, or send `/continue` from one palette.
+Open search from the header or press `Cmd/Ctrl+K`. Search project message history across channels, filter by sender/channel/pinned/todo/done/jobs/session/system messages, switch channels, open Jobs/Rules/Agent Operations, copy tmux attach commands, or send `/continue` from one palette. Selecting an older message result loads a small history window around that message if it is not already mounted in the current DOM.
 
 ### Agent Operations
-The header operations button opens a right-side panel with project metadata, ports, data/upload paths, configured agents, registered agents, heartbeat age, busy/available state, tmux session names, and attach-command copy buttons. It flags common mismatches such as configured agents that never registered or wrappers running without a live heartbeat.
+The header operations button opens a right-side panel with project metadata, server/MCP/loop-guard status badges, ports, data/upload paths, configured agents, registered agents, heartbeat age, busy/available state, tmux session names, and attach-command copy buttons. It flags common mismatches such as configured agents that never registered, running agents outside the current team file, or wrappers running without a live heartbeat.
 
 ### Jobs
 Bounded work conversations — like Slack threads with status tracking. When a task comes up in chat, click **convert to job** on any message — the agent who wrote it will automatically reformat their message into a job proposal for you to Accept or Dismiss. You can also create jobs manually from the jobs panel. Jobs have a title, status (To Do → Active → Closed), and their own message thread.
@@ -568,7 +570,7 @@ label = "Research"
 role = "Researcher"
 ```
 
-`provider` selects the built-in wrapper behavior for aliases, so `provider = "claude"` works even when the handle is `architect`. If `command` is omitted, it defaults to the provider name. The team file's `[agents]` section replaces the default roster for that project. `[agent_defaults.<provider>]` applies shared fields to matching agents, and per-agent values override those defaults. `args = [...]` adds provider CLI arguments after agentchattr's MCP/config arguments. Labels must be unique within a team file. `role` and `team` values are routable with `@role:<name>` and `@team:<name>`; use letters, numbers, and single spaces, dots, underscores, or hyphens so the router can normalize them predictably. Optional `repo_url` and `board_url` fields show up in Agent Operations; `board_url` also replaces the Support link with a `Project Board` pill. Use `link_label` and `link_url` only when you want that pill to point somewhere else.
+`provider` selects the built-in wrapper behavior for aliases, so `provider = "claude"` works even when the handle is `architect`. If `command` is omitted, it defaults to the provider name. The team file's `[agents]` section replaces the default roster for that project. `[agent_defaults.<provider>]` applies shared fields to matching agents, and per-agent values override those defaults. `args = [...]` adds provider CLI arguments after agentchattr's MCP/config arguments. Labels must be unique within a team file. `role` and `team` values are routable with `@role:<name>` and `@team:<name>`: `@team:1` reaches agents with `team = "1"`, and `@role:Builder` reaches agents whose current role is `Builder`. Use letters, numbers, and single spaces, dots, underscores, or hyphens so the router can normalize them predictably. Optional `repo_url` and `board_url` fields show up in Agent Operations; `board_url` also replaces the Support link with a `Project Board` pill. Use `link_label` and `link_url` only when you want that pill to point somewhere else.
 
 Under the hood, `ac` sets `AGENTCHATTR_PROJECT_CONFIG` and `AGENTCHATTR_TMUX_PREFIX`. You can use `AGENTCHATTR_PROJECT_CONFIG=/path/to/team.toml python run.py` directly if you want to start the server by hand.
 

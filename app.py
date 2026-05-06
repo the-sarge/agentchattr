@@ -6,6 +6,7 @@ import os
 import re as _re
 import shlex
 import shutil
+import socket
 import subprocess
 import sys
 import threading
@@ -228,9 +229,9 @@ def _install_security_middleware(token: str, cfg: dict):
 
             # --- Token check ---
             # Allow registered agents to authenticate via Bearer token
-            # for /api/messages and /api/send (no browser session needed).
+            # for read-only message APIs and /api/send (no browser session needed).
             auth_header = request.headers.get("authorization", "")
-            if auth_header.lower().startswith("bearer ") and (path in ("/api/messages", "/api/send") or path.startswith("/api/rules/")):
+            if auth_header.lower().startswith("bearer ") and (path in ("/api/messages", "/api/messages/window", "/api/send") or path.startswith("/api/rules/")):
                 bearer = auth_header[7:].strip()
                 if _self.registry and _self.registry.resolve_token(bearer):
                     return await call_next(request)
@@ -1089,6 +1090,23 @@ def _tmux_sessions() -> set[str]:
     return {line.strip() for line in result.stdout.splitlines() if line.strip()}
 
 
+def _tcp_port_open(host: str, port: int | str, timeout: float = 0.08) -> bool:
+    try:
+        port_num = int(port)
+    except (TypeError, ValueError):
+        return False
+    if port_num <= 0:
+        return False
+    connect_host = str(host or "127.0.0.1")
+    if connect_host in {"0.0.0.0", "::"}:
+        connect_host = "127.0.0.1"
+    try:
+        with socket.create_connection((connect_host, port_num), timeout=timeout):
+            return True
+    except OSError:
+        return False
+
+
 def _tmux_agent_session(
     prefix: str,
     base: str,
@@ -1206,28 +1224,105 @@ def _agent_ops_payload() -> dict:
             },
         })
 
+    server_session = f"{prefix}-server"
+    server_host = project["server"]["host"]
+    server_port = project["server"]["port"]
+    server_tmux_running = server_session in sessions
+    server_listening = _tcp_port_open(server_host, server_port)
+    if server_listening and server_tmux_running:
+        server_status = "running"
+        server_severity = "ok"
+    elif server_listening:
+        server_status = "listening"
+        server_severity = "warn"
+    elif server_tmux_running:
+        server_status = "tmux only"
+        server_severity = "warn"
+    else:
+        server_status = "stopped"
+        server_severity = "down"
+
+    http_port = project["mcp"]["http_port"]
+    sse_port = project["mcp"]["sse_port"]
+    mcp_host = "127.0.0.1"
+    http_listening = _tcp_port_open(mcp_host, http_port)
+    sse_listening = _tcp_port_open(mcp_host, sse_port)
+    channels = room_settings.get("channels", ["general"])
+    paused_channels = [
+        ch for ch in channels
+        if router is not None and router.is_paused(ch)
+    ]
+
     service_badges = [
         {
             "name": "server",
             "label": "Server",
-            "status": "running",
-            "detail": f"{project['server']['host']}:{project['server']['port']}",
-            "tmux_session": f"{prefix}-server",
-            "tmux_running": f"{prefix}-server" in sessions,
+            "status": server_status,
+            "severity": server_severity,
+            "detail": f"{server_host}:{server_port}",
+            "tmux_session": server_session,
+            "tmux_running": server_tmux_running,
+            "listening": server_listening,
         },
         {
             "name": "mcp-http",
             "label": "MCP HTTP",
-            "status": "configured",
-            "detail": str(project["mcp"]["http_port"]),
+            "status": "listening" if http_listening else "closed",
+            "severity": "ok" if http_listening else "warn",
+            "detail": str(http_port),
+            "listening": http_listening,
         },
         {
             "name": "mcp-sse",
             "label": "MCP SSE",
-            "status": "configured",
-            "detail": str(project["mcp"]["sse_port"]),
+            "status": "listening" if sse_listening else "closed",
+            "severity": "ok" if sse_listening else "warn",
+            "detail": str(sse_port),
+            "listening": sse_listening,
+        },
+        {
+            "name": "loop-guard",
+            "label": "Loop Guard",
+            "status": "paused" if paused_channels else "ready",
+            "severity": "warn" if paused_channels else "ok",
+            "detail": ", ".join(paused_channels) if paused_channels else f"max {room_settings.get('max_agent_hops', 100)} hops",
+            "paused_channels": paused_channels,
         },
     ]
+    configured_not_registered = [
+        row["name"] for row in configured
+        if row["mismatches"]["configured_not_registered"]
+    ]
+    registered_not_configured = [
+        row["name"] for row in registered_rows
+        if row["mismatches"]["registered_not_configured"]
+    ]
+    wrapper_without_heartbeat = [
+        row["name"] for row in configured
+        if row["mismatches"]["wrapper_running_without_live_heartbeat"]
+    ]
+    mismatch_details = []
+    if configured_not_registered:
+        mismatch_details.append({
+            "kind": "configured_not_registered",
+            "title": "Configured agents are not running",
+            "detail": "Start or restart the project wrappers, then check whether each agent registers.",
+            "names": configured_not_registered,
+        })
+    if registered_not_configured:
+        mismatch_details.append({
+            "kind": "registered_not_configured",
+            "title": "Running agents are outside this team file",
+            "detail": "These live agents do not match the current configured roster.",
+            "names": registered_not_configured,
+        })
+    if wrapper_without_heartbeat:
+        mismatch_details.append({
+            "kind": "wrapper_running_without_live_heartbeat",
+            "title": "Wrappers are running without agent heartbeats",
+            "detail": "Attach to the wrapper or live tmux session to see whether the CLI is blocked or exited.",
+            "names": wrapper_without_heartbeat,
+        })
     return {
         "project": project,
         "service_badges": service_badges,
@@ -1235,12 +1330,10 @@ def _agent_ops_payload() -> dict:
         "registered_agents": registered_rows,
         "tmux_sessions": sorted(s for s in sessions if s == prefix or s.startswith(prefix + "-")),
         "mismatches": {
-            "configured_not_registered": [row["name"] for row in configured if row["mismatches"]["configured_not_registered"]],
-            "registered_not_configured": [row["name"] for row in registered_rows if row["mismatches"]["registered_not_configured"]],
-            "wrapper_running_without_live_heartbeat": [
-                row["name"] for row in configured
-                if row["mismatches"]["wrapper_running_without_live_heartbeat"]
-            ],
+            "configured_not_registered": configured_not_registered,
+            "registered_not_configured": registered_not_configured,
+            "wrapper_running_without_live_heartbeat": wrapper_without_heartbeat,
+            "details": mismatch_details,
         },
     }
 
@@ -1746,6 +1839,15 @@ async def get_messages(since_id: int = 0, limit: int = 50, channel: str = ""):
     if since_id:
         return store.get_since(since_id, channel=ch)
     return store.get_recent(limit, channel=ch)
+
+
+@app.get("/api/messages/window")
+async def get_message_window(message_id: int, before: int = 60, after: int = 20, channel: str = ""):
+    ch = channel if channel else None
+    payload = store.get_window_around(message_id, before=before, after=after, channel=ch)
+    if payload is None:
+        return JSONResponse({"error": "message not found"}, status_code=404)
+    return payload
 
 
 @app.get("/api/search")

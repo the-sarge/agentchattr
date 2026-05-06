@@ -149,6 +149,13 @@ Common fields:
 - `args`: extra provider CLI arguments appended after agentchattr-owned MCP
   arguments and before ad hoc wrapper pass-through arguments
 
+Routing examples:
+
+- `@architect` routes to the single agent handle named `architect`.
+- `@team:1` routes to agents configured with `team = "1"`.
+- `@role:Builder` routes to agents whose current role is `Builder`.
+- Mentions inside inline code or fenced code blocks are ignored for routing.
+
 For normal aliases, prefer `provider` and omit `command`:
 
 ```toml
@@ -208,7 +215,8 @@ Team labels must be unique, and `role` / `team` values must use letters,
 numbers, and single spaces, dots, underscores, or hyphens so `@role:<name>`
 and `@team:<name>` routing can address them reliably. For values with spaces,
 mention the normalized hyphen form, for example `role = "Code Review"` is
-addressed as `@role:Code-Review`.
+addressed as `@role:Code-Review`. Team and role routing is intentionally
+documented first; autocomplete hints can be layered into the web UI later.
 
 ## Multiple Projects
 

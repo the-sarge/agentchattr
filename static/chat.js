@@ -2333,12 +2333,85 @@ function cancelReply() {
 
 function scrollToMessage(msgId) {
     const el = document.querySelector(`.message[data-id="${msgId}"]`);
-    if (!el) return;
+    if (!el) return false;
     el.scrollIntoView({ behavior: 'smooth', block: 'center' });
     el.classList.add('highlight');
     setTimeout(() => el.classList.remove('highlight'), 1500);
+    return true;
 }
 window.scrollToMessage = scrollToMessage;
+
+async function navigateToMessage(msgId, channel) {
+    const targetId = String(msgId ?? '').trim();
+    if (!targetId) return false;
+    const targetChannel = String(channel || 'general');
+    if (activeChannel !== targetChannel && typeof window.switchChannel === 'function') {
+        window.switchChannel(targetChannel);
+    }
+    if (scrollToMessage(targetId)) return true;
+    return loadMessageWindowForTarget(targetId, targetChannel);
+}
+
+async function loadMessageWindowForTarget(msgId, channel) {
+    const params = new URLSearchParams({
+        message_id: String(msgId),
+        before: '80',
+        after: '40',
+        channel: String(channel || ''),
+    });
+    try {
+        const resp = await fetch(`/api/messages/window?${params.toString()}`, {
+            headers: { 'X-Session-Token': SESSION_TOKEN },
+        });
+        if (!resp.ok) {
+            showToast(resp.status === 404 ? 'Message is no longer available' : 'Unable to load message history', 'error');
+            return false;
+        }
+        const payload = await resp.json();
+        const messages = Array.isArray(payload.messages) ? payload.messages : [];
+        if (!messages.length) {
+            console.error('Message navigation returned an empty window', payload);
+            showToast('Unable to load message history', 'error');
+            return false;
+        }
+        if (payload.channel && activeChannel !== payload.channel && typeof window.switchChannel === 'function') {
+            window.switchChannel(payload.channel);
+        }
+        const container = document.getElementById('messages');
+        if (!container) {
+            console.error('Message navigation: #messages element not found');
+            return false;
+        }
+        container.innerHTML = '';
+        const resetDateState = getMessageRenderingMethod('resetDateState', 'message window navigation');
+        if (resetDateState) resetDateState();
+        const appendMessage = getMessageRenderingMethod('appendMessage', 'message window navigation');
+        if (!appendMessage) return false;
+        const previousAutoScroll = autoScroll;
+        try {
+            autoScroll = true;
+            messages.forEach(msg => {
+                if (msg.todo_status) todos[msg.id] = msg.todo_status;
+                appendMessage(msg);
+            });
+        } finally {
+            autoScroll = previousAutoScroll;
+        }
+        window.filterMessagesByChannel?.();
+        return new Promise(resolve => {
+            requestAnimationFrame(() => {
+                const found = scrollToMessage(msgId);
+                if (!found) showToast('Loaded history, but the target message was not rendered', 'error');
+                resolve(found);
+            });
+        });
+    } catch (err) {
+        console.error('Message navigation failed', err);
+        showToast('Unable to load message history', 'error');
+        return false;
+    }
+}
+window.navigateToMessage = navigateToMessage;
 
 // Pin/todo actions and panel rendering live in pins-todos.js.
 

@@ -135,6 +135,44 @@ class MessageStore:
                 msgs = [m for m in msgs if m.get("channel", "general") == channel]
             return msgs
 
+    def get_window_around(
+        self,
+        msg_id: int,
+        before: int = 60,
+        after: int = 20,
+        channel: str | None = None,
+    ) -> dict | None:
+        """Return a bounded message window containing msg_id."""
+        target_id = int(msg_id)
+        before = max(0, min(int(before or 0), 200))
+        after = max(0, min(int(after or 0), 200))
+        with self._lock:
+            msgs = self._messages
+            if channel:
+                msgs = [m for m in msgs if m.get("channel", "general") == channel]
+            target_index = next((i for i, m in enumerate(msgs) if m.get("id") == target_id), None)
+            if target_index is None:
+                return None
+            start = max(0, target_index - before)
+            end = min(len(msgs), target_index + after + 1)
+            rows = []
+            for msg in msgs[start:end]:
+                row = dict(msg)
+                todo_status = self._todos.get(msg["id"])
+                if todo_status:
+                    row["todo_status"] = todo_status
+                rows.append(row)
+            target = msgs[target_index]
+            return {
+                "messages": rows,
+                "target_id": target_id,
+                "channel": target.get("channel", "general"),
+                "start_id": rows[0]["id"] if rows else None,
+                "end_id": rows[-1]["id"] if rows else None,
+                "has_before": start > 0,
+                "has_after": end < len(msgs),
+            }
+
     def search(
         self,
         query: str = "",
