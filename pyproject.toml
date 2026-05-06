@@ -1,0 +1,11 @@
+[project]
+name = "agentchattr"
+version = "0.4.0"
+description = "Local chat server for real-time coordination between AI coding agents and humans."
+readme = "README.md"
+requires-python = ">=3.11"
+dependencies = [
+    "fastapi>=0.110",
+    "uvicorn[standard]>=0.29",
+    "mcp>=1.0",
+]

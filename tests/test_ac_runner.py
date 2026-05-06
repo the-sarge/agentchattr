@@ -14,7 +14,7 @@ ROOT = Path(__file__).resolve().parents[1]
 
 
 def load_ac():
-    loader = importlib.machinery.SourceFileLoader("ac_runner", str(ROOT / "ac"))
+    loader = importlib.machinery.SourceFileLoader("ac_runner", str(ROOT / "ac.py"))
     spec = importlib.util.spec_from_loader("ac_runner", loader)
     module = importlib.util.module_from_spec(spec)
     assert spec.loader is not None
@@ -71,6 +71,8 @@ args = ["--quiet"]
         self.assertIn("Server log:", out)
         self.assertIn("agentchattr-demo-wrap-builder", out)
         self.assertIn("2>&1 | tee -a", out)
+        self.assertIn("uv run --project", out)
+        self.assertNotIn(".venv", out)
         self.assertIn("wrapper.py builder --detach --tmux-prefix agentchattr-demo", out)
 
     def test_start_tmux_session_wraps_tmux_not_found(self):
@@ -188,7 +190,7 @@ args = ["--quiet"]
                 mock.patch.object(self.ac, "_port_open", return_value=True), \
                 mock.patch.object(self.ac, "_tmux_session_exists", return_value=True), \
                 mock.patch.object(self.ac, "_kill_tmux_session", side_effect=killed.append), \
-                mock.patch.object(self.ac, "_ensure_venv", return_value=Path("/venv/bin/python")), \
+                mock.patch.object(self.ac, "_check_uv"), \
                 mock.patch.object(self.ac, "_start_wrapper", side_effect=lambda *a: started.append(a)):
             self.ac.restart(args)
 
@@ -275,7 +277,7 @@ args = ["--quiet"]
 
         with mock.patch.object(self.ac, "_project_context", return_value=(Path("/tmp/demo.toml"), team, "demo", "agentchattr-demo", 8390, ["builder"])), \
                 mock.patch.object(self.ac, "_preflight_project"), \
-                mock.patch.object(self.ac, "_ensure_venv", return_value=Path("/venv/bin/python")), \
+                mock.patch.object(self.ac, "_check_uv"), \
                 mock.patch.object(self.ac, "_tmux_session_exists", return_value=False), \
                 mock.patch.object(self.ac, "_start_tmux_session"), \
                 mock.patch.object(self.ac, "_wait_for_port", return_value=False):

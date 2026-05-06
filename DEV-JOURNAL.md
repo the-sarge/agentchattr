@@ -548,3 +548,74 @@ Operations, and `./ac <project> logs server` can read the persisted
 2. Consider API-backed `./ac status` detail when the server is reachable.
 3. Smoke test persisted server logs after a forced startup crash and status
    output with wrapper-only and live-only sessions.
+
+---
+
+## 2026-05-06 17:44 EDT - uv Runtime Migration Closeout
+
+**Branch:** `main`
+**Base Commit:** `f6962aa`
+**Commits:** none
+
+### Summary
+
+Replaced the repo-local virtualenv launcher flow with a uv-only runtime model.
+The source checkout now declares Python dependencies in `pyproject.toml` and
+ships a `uv.lock`; `./ac`, team runner server/wrapper commands, and platform
+launchers all run through `uv run`.
+
+### Decisions
+
+- Require uv instead of preserving a legacy `.venv` fallback because there are
+  no existing users to preserve.
+- Keep `./ac` as the user-facing command, with the Python runner moved to
+  `ac.py` behind a tiny uv shim.
+- Keep release artifacts source-checkout friendly by including `pyproject.toml`
+  and `uv.lock`.
+- Share launcher uv checks through platform-local helper files instead of
+  copying the same block into every launcher.
+
+### Changes
+
+- Added `pyproject.toml` and `uv.lock`; removed `requirements.txt`.
+- Replaced `./ac` with a uv-required shim and moved the runner implementation
+  to `ac.py`.
+- Updated `ac.py` dry-run, `up`, and `restart` paths to launch `run.py`,
+  `wrapper.py`, and `wrapper_api.py` via `uv run --project`.
+- Updated Mac/Linux launchers to source `macos-linux/common.sh` for uv checks.
+- Updated Windows launchers to call `windows/common.bat` for uv checks.
+- Updated README quickstarts with an explicit uv install step and changed
+  manual commands from direct `python` to `uv run --project . python`.
+- Updated release packaging to include uv project metadata and the new runner
+  split.
+
+### Verification
+
+- Ran `./ac --help`.
+- Ran `./ac list`.
+- Ran `./ac -f teams/two-agent.toml.example two-agent up --dry-run`.
+- Ran `uv run --project . python -c "import fastapi, uvicorn, mcp"`.
+- Ran `uv run --project . python -m py_compile ac.py build_release.py config_loader.py`.
+- Ran `sh -n macos-linux/*.sh`.
+- Ran `uv run --project . python -m pytest tests/test_ac_runner.py -q`; latest
+  validation passed `13` tests.
+- Ran `uv run --project . python -m pytest -q`; latest validation passed
+  `115` tests plus `4` subtests.
+- Ran `git diff --check`.
+
+### Open Questions
+
+- uv still manages an environment under the hood. If the repo should never
+  contain a `.venv` directory, set `UV_PROJECT_ENVIRONMENT` to a user-cache path
+  in the runner and launchers.
+- The full platform launcher matrix has syntax coverage for Mac/Linux, but
+  Windows launchers still need a real Windows smoke test after this change.
+
+### Next Steps
+
+1. Smoke test one normal Mac/Linux launcher and one Windows launcher with uv
+   installed from a clean checkout.
+2. Decide whether to keep uv's default project environment location or force a
+   cache-managed `UV_PROJECT_ENVIRONMENT`.
+3. Continue runner recovery ergonomics: one-agent restart polish, richer logs,
+   and possible API-backed `./ac status`.

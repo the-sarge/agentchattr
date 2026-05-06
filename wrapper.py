@@ -1,11 +1,11 @@
 """Agent wrapper - runs the real interactive CLI with auto-trigger on @mentions.
 
 Usage:
-    python wrapper.py claude
-    python wrapper.py codex
-    python wrapper.py gemini
-    python wrapper.py kimi
-    python wrapper.py qwen
+    uv run --project . python wrapper.py claude
+    uv run --project . python wrapper.py codex
+    uv run --project . python wrapper.py gemini
+    uv run --project . python wrapper.py kimi
+    uv run --project . python wrapper.py qwen
 
 Cross-platform:
   - Windows: injects keystrokes via Win32 WriteConsoleInput (wrapper_windows.py)

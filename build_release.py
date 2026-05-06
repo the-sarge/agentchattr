@@ -15,6 +15,8 @@ OUT_NAME = f"agentchattr-{VERSION}"
 
 # Files and dirs to include (relative to repo root)
 INCLUDE_FILES = [
+    "ac",
+    "ac.py",
     "app.py",
     "agents.py",
     "config_loader.py",
@@ -37,7 +39,8 @@ INCLUDE_FILES = [
     "open_chat.html",
     "config.toml",
     "config.local.toml.example",
-    "requirements.txt",
+    "pyproject.toml",
+    "uv.lock",
     "README.md",
     "LICENSE",
     "VERSION",

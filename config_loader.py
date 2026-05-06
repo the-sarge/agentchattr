@@ -82,8 +82,9 @@ def apply_cli_overrides(argv: list[str] | None = None) -> None:
     and `--flag=value` forms.
 
     Arguments after a literal `--` are treated as pass-through (e.g. for the
-    agent CLI in wrapper.py) and are NOT scanned — `python wrapper.py claude
-    -- --port 9999` sets `--port 9999` on the agent, not on agentchattr.
+    agent CLI in wrapper.py) and are NOT scanned — `uv run --project . python
+    wrapper.py claude -- --port 9999` sets `--port 9999` on the agent, not on
+    agentchattr.
     """
     if argv is None:
         argv = sys.argv

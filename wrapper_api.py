@@ -1,8 +1,8 @@
 """API agent wrapper — bridges the chat room to an OpenAI-compatible endpoint.
 
 Usage:
-    python wrapper_api.py qwen
-    python wrapper_api.py my-local-model
+    uv run --project . python wrapper_api.py qwen
+    uv run --project . python wrapper_api.py my-local-model
 
 For local models (Ollama, llama-server, LM Studio, etc.) that expose an
 OpenAI-compatible /v1/chat/completions endpoint but have no CLI to inject
@@ -59,7 +59,7 @@ def main():
         print("  To add one, copy the example config:")
         print("    cp config.local.toml.example config.local.toml")
         print("  Then uncomment and edit an [agents.NAME] section (set type = \"api\").")
-        print("  Finally: python wrapper_api.py <name>")
+        print("  Finally: uv run --project . python wrapper_api.py <name>")
         sys.exit(1)
 
     parser = argparse.ArgumentParser(description="API agent wrapper for OpenAI-compatible endpoints")
@@ -108,7 +108,7 @@ def main():
         registration = _register_instance(server_port, agent, args.label)
     except Exception as exc:
         print(f"  Registration failed ({exc}).")
-        print("  Is the server running? Start it with: python run.py")
+        print("  Is the server running? Start it with: uv run --project . python run.py")
         sys.exit(1)
 
     name = registration["name"]
