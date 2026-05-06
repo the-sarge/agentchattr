@@ -194,10 +194,8 @@ def _allows_bearer_auth(path: str) -> bool:
     return path in _BEARER_AUTH_PATHS or path.startswith("/api/rules/")
 
 
-def _install_security_middleware(token: str, cfg: dict):
-    """Add token validation and origin checking middleware to the app."""
+def _security_middleware_class(cfg: dict):
     import app as _self
-    _self.session_token = token
     port = cfg.get("server", {}).get("port", 8300)
     allowed_origins = {
         f"http://127.0.0.1:{port}",
@@ -253,6 +251,14 @@ def _install_security_middleware(token: str, cfg: dict):
 
             return await call_next(request)
 
+    return SecurityMiddleware
+
+
+def _install_security_middleware(token: str, cfg: dict):
+    """Add token validation and origin checking middleware to the app."""
+    import app as _self
+    _self.session_token = token
+    SecurityMiddleware = _security_middleware_class(cfg)
     app.add_middleware(SecurityMiddleware)
 
 

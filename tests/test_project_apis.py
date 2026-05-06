@@ -9,6 +9,9 @@ import unittest
 from pathlib import Path
 from unittest import mock
 
+from fastapi import FastAPI
+from fastapi.testclient import TestClient
+
 ROOT = Path(__file__).resolve().parents[1]
 if str(ROOT) not in sys.path:
     sys.path.insert(0, str(ROOT))
@@ -335,6 +338,41 @@ class ProjectApiPayloadTests(unittest.TestCase):
         self.assertTrue(app._allows_bearer_auth("/api/rules/active"))
         self.assertFalse(app._allows_bearer_auth("/api/search"))
         self.assertFalse(app._allows_bearer_auth("/api/export"))
+
+    def test_message_window_bearer_auth_through_middleware(self):
+        saved_session_token = app.session_token
+        try:
+            with tempfile.TemporaryDirectory() as tmp:
+                registry = RuntimeRegistry(data_dir=tmp)
+                registry.seed({"builder": {"provider": "codex"}})
+                registered = registry.register("builder")
+                app.registry = registry
+                app.session_token = "browser-token"
+
+                probe_app = FastAPI()
+
+                @probe_app.get("/api/messages/window")
+                async def message_window_probe():
+                    return {"ok": True}
+
+                @probe_app.get("/api/search")
+                async def search_probe():
+                    return {"ok": True}
+
+                probe_app.add_middleware(app._security_middleware_class({"server": {"port": 8390}}))
+                client = TestClient(probe_app)
+                bearer = {"Authorization": f"Bearer {registered['token']}"}
+
+                allowed = client.get("/api/messages/window", headers=bearer)
+                missing_token = client.get("/api/messages/window")
+                denied_bearer = client.get("/api/search", headers=bearer)
+
+            self.assertEqual(allowed.status_code, 200)
+            self.assertEqual(allowed.json(), {"ok": True})
+            self.assertEqual(missing_token.status_code, 403)
+            self.assertEqual(denied_bearer.status_code, 403)
+        finally:
+            app.session_token = saved_session_token
 
     def test_sync_router_agents_includes_team_and_role_metadata(self):
         app.config = {
