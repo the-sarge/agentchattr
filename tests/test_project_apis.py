@@ -190,6 +190,68 @@ class ProjectApiPayloadTests(unittest.TestCase):
         self.assertEqual(builder["registered_names"], ["builder"])
         self.assertIn("tmux attach -t agentchattr-demo-builder", builder["attach"]["live"])
 
+    def test_agent_ops_registered_attach_uses_original_tmux_slot_after_rename(self):
+        app.config = {
+            "project": {"name": "demo", "tmux_prefix": "agentchattr-demo"},
+            "server": {"port": 8390, "host": "127.0.0.1", "data_dir": "./data/demo"},
+            "mcp": {"http_port": 8290, "sse_port": 8291},
+            "images": {"upload_dir": "./uploads/demo"},
+            "agents": {
+                "builder": {"provider": "codex", "label": "Builder", "color": "#10a37f"},
+            },
+        }
+        with tempfile.TemporaryDirectory() as tmp:
+            registry = RuntimeRegistry(data_dir=tmp)
+            registry.seed(app.config["agents"])
+            registry.register("builder")
+            registry.rename("builder", "agentchattr-builder")
+            app.registry = registry
+            app.agents = AgentTrigger(registry, data_dir=tmp)
+
+            with mock.patch.object(app, "_tmux_sessions", return_value={"agentchattr-demo-builder"}):
+                payload = app._agent_ops_payload()
+
+        row = next(row for row in payload["registered_agents"] if row["name"] == "agentchattr-builder")
+        self.assertEqual(row["tmux"]["live_session"], "agentchattr-demo-builder")
+        self.assertEqual(row["attach"]["live"], "tmux attach -t agentchattr-demo-builder")
+
+    def test_agent_ops_registered_attach_uses_slot_for_multiple_instances(self):
+        app.config = {
+            "project": {"name": "demo", "tmux_prefix": "agentchattr-demo"},
+            "server": {"port": 8390, "host": "127.0.0.1", "data_dir": "./data/demo"},
+            "mcp": {"http_port": 8290, "sse_port": 8291},
+            "images": {"upload_dir": "./uploads/demo"},
+            "agents": {
+                "builder": {"provider": "codex", "label": "Builder", "color": "#10a37f"},
+            },
+        }
+        with tempfile.TemporaryDirectory() as tmp:
+            registry = RuntimeRegistry(data_dir=tmp)
+            registry.seed(app.config["agents"])
+            registry.register("builder")
+            registry.register("builder")
+            app.registry = registry
+            app.agents = AgentTrigger(registry, data_dir=tmp)
+
+            with mock.patch.object(app, "_tmux_sessions", return_value={
+                "agentchattr-demo-builder",
+                "agentchattr-demo-builder-2",
+            }):
+                payload = app._agent_ops_payload()
+
+        rows = {row["name"]: row for row in payload["registered_agents"]}
+        self.assertEqual(rows["builder-1"]["tmux"]["live_session"], "agentchattr-demo-builder")
+        self.assertEqual(rows["builder-2"]["tmux"]["live_session"], "agentchattr-demo-builder-2")
+        self.assertTrue(rows["builder-2"]["tmux"]["live_running"])
+
+    def test_tmux_agent_session_preserves_base_name_and_warns_on_bad_slot(self):
+        self.assertEqual(app._tmux_agent_session("prefix", "Builder Name"), "prefix-Builder Name")
+        with self.assertLogs(app.log, level="WARNING") as captured:
+            session = app._tmux_agent_session("prefix", "builder", "bad")
+
+        self.assertEqual(session, "prefix-builder")
+        self.assertIn("invalid slot 'bad' for agent base='builder'", captured.output[0])
+
 
 if __name__ == "__main__":
     unittest.main()

@@ -438,13 +438,17 @@
             // Reply quote (if this message is a reply)
             let replyHtml = '';
             if (msg.reply_to !== undefined && msg.reply_to !== null) {
+                const replyIdHtml = htmlEscape(msg.reply_to);
+                const replyIdAttr = htmlAttr(msg.reply_to);
                 const parentEl = document.querySelector(`.message[data-id="${msg.reply_to}"]`);
                 if (parentEl) {
                     const parentSender = parentEl.querySelector('.msg-sender')?.textContent || '?';
                     const parentText = parentEl.dataset.rawText || parentEl.querySelector('.msg-text')?.textContent || '';
                     const truncated = parentText.length > 80 ? parentText.slice(0, 80) + '...' : parentText;
                     const parentColor = parentEl.querySelector('.msg-sender')?.style.color || 'var(--text-dim)';
-                    replyHtml = `<div class="reply-quote" data-message-action="scroll-to-message" data-target-message-id="${htmlAttr(msg.reply_to)}"><span class="reply-sender" style="color: ${parentColor}">${htmlEscape(parentSender)}</span> ${htmlEscape(truncated)}</div>`;
+                    replyHtml = `<div class="reply-quote" data-message-action="scroll-to-message" data-target-message-id="${replyIdAttr}"><span class="reply-message-id">#${replyIdHtml}</span><span class="reply-sender" style="color: ${parentColor}">${htmlEscape(parentSender)}</span> ${htmlEscape(truncated)}</div>`;
+                } else {
+                    replyHtml = `<div class="reply-quote" data-message-action="scroll-to-message" data-target-message-id="${replyIdAttr}"><span class="reply-message-id">#${replyIdHtml}</span><span class="reply-sender">reply</span></div>`;
                 }
             }
 
@@ -472,7 +476,7 @@
                     ).join('') + '</div>';
                 }
             }
-            el.innerHTML = `<div class="todo-strip"></div>${isSelf ? '' : avatarHtml}<div class="chat-bubble" style="--bubble-color: ${senderColor}">${replyHtml}<div class="bubble-header"><span class="msg-sender" style="color: ${senderColor}">${htmlEscape(msg.sender)}</span>${rolePillHtml}<span class="msg-time">${msg.time || ''}</span></div><div class="msg-text">${textHtml}</div>${choicesHtml}${attachmentsHtml}<button type="button" class="convert-job-pill" data-message-action="start-job" data-message-id="${htmlAttr(msg.id)}" title="Convert to job">convert to job</button><button type="button" class="bubble-copy" data-message-action="copy-message" data-message-id="${htmlAttr(msg.id)}" title="Copy message"><svg width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><rect x="9" y="9" width="13" height="13" rx="2"/><path d="M5 15H4a2 2 0 0 1-2-2V4a2 2 0 0 1 2-2h9a2 2 0 0 1 2 2v1"/></svg></button></div><div class="msg-actions"><button type="button" class="reply-btn" data-message-action="reply" data-message-id="${htmlAttr(msg.id)}">reply</button><button type="button" class="todo-hint" data-message-action="todo-cycle" data-message-id="${htmlAttr(msg.id)}">${htmlEscape(statusLabel)}</button><button type="button" class="delete-btn" data-message-action="delete" data-message-id="${htmlAttr(msg.id)}" title="Delete">del</button></div>`;
+            el.innerHTML = `<div class="todo-strip"></div>${isSelf ? '' : avatarHtml}<div class="chat-bubble" style="--bubble-color: ${senderColor}">${replyHtml}<div class="bubble-header"><span class="msg-sender" style="color: ${senderColor}">${htmlEscape(msg.sender)}</span>${rolePillHtml}<span class="msg-time">${msg.time || ''}</span><span class="msg-id">#${htmlEscape(msg.id)}</span></div><div class="msg-text">${textHtml}</div>${choicesHtml}${attachmentsHtml}<button type="button" class="convert-job-pill" data-message-action="start-job" data-message-id="${htmlAttr(msg.id)}" title="Convert to job">convert to job</button><button type="button" class="bubble-copy" data-message-action="copy-message" data-message-id="${htmlAttr(msg.id)}" title="Copy message"><svg width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><rect x="9" y="9" width="13" height="13" rx="2"/><path d="M5 15H4a2 2 0 0 1-2-2V4a2 2 0 0 1 2-2h9a2 2 0 0 1 2 2v1"/></svg></button></div><div class="msg-actions"><button type="button" class="reply-btn" data-message-action="reply" data-message-id="${htmlAttr(msg.id)}">reply</button><button type="button" class="todo-hint" data-message-action="todo-cycle" data-message-id="${htmlAttr(msg.id)}">${htmlEscape(statusLabel)}</button><button type="button" class="delete-btn" data-message-action="delete" data-message-id="${htmlAttr(msg.id)}" title="Delete">del</button></div>`;
             if (todoStatus) el.classList.add('msg-todo', `msg-todo-${todoStatus}`);
             if (msg.metadata?.session_output) el.classList.add('session-output');
 
