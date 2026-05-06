@@ -38,6 +38,35 @@ class RouterMentionTests(unittest.TestCase):
         self.assertEqual(router.parse_mentions("@telegram-bot check"), [])
         self.assertEqual(router.get_targets("ben", "@telegram-bot check"), [])
 
+    def test_inline_code_mentions_do_not_route(self):
+        router = Router(["telegram-bridge", "builder"], default_mention="none")
+
+        self.assertEqual(router.parse_mentions("Document `@telegram-bridge` here"), [])
+        self.assertEqual(router.get_targets("ben", "Document `@telegram-bridge` here"), [])
+        self.assertEqual(
+            set(router.parse_mentions("Document `@telegram-bridge` but ping @builder")),
+            {"builder"},
+        )
+
+    def test_fenced_code_mentions_do_not_route(self):
+        router = Router(["telegram-bridge", "builder"], default_mention="none")
+        text = "Please do not route this:\n```text\n@telegram-bridge\n```\nBut route @builder"
+
+        self.assertEqual(set(router.parse_mentions(text)), {"builder"})
+        self.assertEqual(router.get_targets("ben", "```python\n@telegram-bridge\n```"), [])
+
+    def test_tilde_fenced_code_mentions_do_not_route(self):
+        router = Router(["telegram-bridge"], default_mention="none")
+
+        self.assertEqual(router.parse_mentions("~~~\n@telegram-bridge\n~~~"), [])
+
+    def test_code_quoted_all_does_not_route_online_agents(self):
+        router = Router(["builder", "reviewer"], default_mention="none",
+                        online_checker=lambda: {"builder", "reviewer"})
+
+        self.assertEqual(router.parse_mentions("Use `@all` in docs"), [])
+        self.assertEqual(set(router.parse_mentions("Use `@all` in docs, then ping @all")), {"builder", "reviewer"})
+
 
 if __name__ == "__main__":
     unittest.main()
