@@ -16,8 +16,8 @@ message actions, attachments, sessions, schedules, or navigation.
 ## Message Actions
 
 - [ ] Send a normal text message.
-  - Expected: it appears immediately with a dim message ID near the top right
-    of the bubble, with no console errors.
+  - Expected: it appears immediately with a dim selectable message ID in the
+    bubble header after the timestamp, with no console errors.
 
 - [ ] Click `reply` on that message, type a reply, and send it.
   - Expected: reply preview appears, the sent message shows a reply quote, and
