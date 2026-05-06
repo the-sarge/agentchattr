@@ -291,6 +291,21 @@ Detach from tmux without stopping the agent:
 Ctrl+B, then D
 ```
 
+## Status
+
+Inspect the same operational categories shown in Agent Operations:
+
+```bash
+./ac project-a status
+```
+
+`status` reports Server, MCP HTTP, and MCP SSE listening state, then each
+configured agent's live tmux session and wrapper supervisor state. A
+`wrapper only` row means the supervisor is still running but the live agent tmux
+session is gone. A `live only` row means the agent pane is present without its
+wrapper supervisor. Extra prefixed tmux sessions are shown as
+running-but-not-configured warnings.
+
 ## Restarting One Agent
 
 Restart one wrapper/live agent pair without touching the server or other
@@ -320,7 +335,10 @@ Capture recent tmux pane output without attaching:
 ./ac project-a logs wrapper:claude-planner
 ```
 
-The default is `--lines 200`. A raw tmux session name also works as the target.
+The default is `--lines 200`. `logs server` reads the persisted
+`data_dir/server.log` first, so it still works after an early server crash has
+closed the tmux pane. Agent and wrapper targets capture the relevant tmux pane;
+a raw tmux session name also works as the target.
 
 ## Stopping A Project
 
