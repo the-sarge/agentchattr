@@ -1,3 +1,4 @@
+import asyncio
 import os
 import sys
 import json
@@ -15,6 +16,16 @@ import app  # noqa: E402
 import mcp_bridge  # noqa: E402
 from agents import AgentTrigger  # noqa: E402
 from registry import RuntimeRegistry  # noqa: E402
+from router import Router  # noqa: E402
+
+
+class FakeRequest:
+    def __init__(self, payload=None, headers=None):
+        self._payload = payload or {}
+        self.headers = headers or {}
+
+    async def json(self):
+        return self._payload
 
 
 class ProjectApiPayloadTests(unittest.TestCase):
@@ -22,14 +33,17 @@ class ProjectApiPayloadTests(unittest.TestCase):
         self._saved_config = app.config
         self._saved_registry = app.registry
         self._saved_agents = app.agents
+        self._saved_router = app.router
         self._saved_project_env = os.environ.get("AGENTCHATTR_PROJECT_CONFIG")
         self._saved_prefix_env = os.environ.get("AGENTCHATTR_TMUX_PREFIX")
         self._presence = dict(mcp_bridge._presence)
         self._activity = dict(mcp_bridge._activity)
         self._activity_ts = dict(mcp_bridge._activity_ts)
+        self._roles = dict(mcp_bridge._roles)
         mcp_bridge._presence.clear()
         mcp_bridge._activity.clear()
         mcp_bridge._activity_ts.clear()
+        mcp_bridge._roles.clear()
         os.environ.pop("AGENTCHATTR_PROJECT_CONFIG", None)
         os.environ.pop("AGENTCHATTR_TMUX_PREFIX", None)
 
@@ -37,6 +51,7 @@ class ProjectApiPayloadTests(unittest.TestCase):
         app.config = self._saved_config
         app.registry = self._saved_registry
         app.agents = self._saved_agents
+        app.router = self._saved_router
         if self._saved_project_env is None:
             os.environ.pop("AGENTCHATTR_PROJECT_CONFIG", None)
         else:
@@ -51,6 +66,8 @@ class ProjectApiPayloadTests(unittest.TestCase):
         mcp_bridge._activity.update(self._activity)
         mcp_bridge._activity_ts.clear()
         mcp_bridge._activity_ts.update(self._activity_ts)
+        mcp_bridge._roles.clear()
+        mcp_bridge._roles.update(self._roles)
 
     def test_project_payload_defaults_without_team_file(self):
         app.config = {
@@ -223,6 +240,97 @@ class ProjectApiPayloadTests(unittest.TestCase):
         self.assertEqual(rows["builder-2"]["team"], "1")
         self.assertEqual(app.registry.get_agent_config()["builder-1"]["team"], "1")
         self.assertEqual(app.registry.get_agent_config()["builder-2"]["team"], "1")
+
+    def test_sync_router_agents_includes_team_and_role_metadata(self):
+        app.config = {
+            "project": {"name": "demo", "tmux_prefix": "agentchattr-demo"},
+            "server": {"port": 8390, "host": "127.0.0.1", "data_dir": "./data/demo"},
+            "mcp": {"http_port": 8290, "sse_port": 8291},
+            "images": {"upload_dir": "./uploads/demo"},
+            "agents": {
+                "builder": {"provider": "codex", "label": "Builder", "color": "#10a37f", "team": "1"},
+                "reviewer": {"provider": "codex", "label": "Reviewer", "color": "#10a37f", "team": "1"},
+            },
+        }
+        with tempfile.TemporaryDirectory() as tmp:
+            registry = RuntimeRegistry(data_dir=tmp)
+            registry.seed(app.config["agents"])
+            registry.register("builder")
+            registry.register("reviewer")
+            app.registry = registry
+            app.router = Router([], default_mention="none")
+            mcp_bridge._roles["builder"] = "Builder"
+            mcp_bridge._roles["reviewer"] = "Reviewer"
+
+            app._sync_router_agents()
+
+        self.assertEqual(set(app.router.parse_mentions("@team:1")), {"builder", "reviewer"})
+        self.assertEqual(set(app.router.parse_mentions("@role:Builder")), {"builder"})
+
+    def test_set_agent_role_invokes_router_sync(self):
+        app.config = {
+            "agents": {"builder": {"provider": "codex", "label": "Builder"}},
+        }
+        with tempfile.TemporaryDirectory() as tmp:
+            registry = RuntimeRegistry(data_dir=tmp)
+            registry.seed(app.config["agents"])
+            registry.register("builder")
+            app.registry = registry
+            app.router = Router(["builder"], default_mention="none")
+
+            with mock.patch.object(app, "_sync_router_agents", return_value=True) as sync:
+                with mock.patch.object(app, "broadcast_status", new=mock.AsyncMock()):
+                    response = asyncio.run(app.set_agent_role("builder", FakeRequest({"role": "Reviewer"})))
+
+        self.assertEqual(response.status_code, 200)
+        sync.assert_called_once_with(report_missing=True)
+        self.assertEqual(mcp_bridge.get_role("builder"), "Reviewer")
+
+    def test_set_agent_role_rejects_base_family_without_active_instance(self):
+        app.config = {
+            "agents": {"builder": {"provider": "codex", "label": "Builder"}},
+        }
+        with tempfile.TemporaryDirectory() as tmp:
+            registry = RuntimeRegistry(data_dir=tmp)
+            registry.seed(app.config["agents"])
+            registry.register("builder")
+            registry.register("builder")
+            app.registry = registry
+            app.router = Router(["builder-1", "builder-2"], default_mention="none")
+
+            with mock.patch.object(app, "broadcast_status", new=mock.AsyncMock()):
+                response = asyncio.run(app.set_agent_role("builder", FakeRequest({"role": "Reviewer"})))
+
+        self.assertEqual(response.status_code, 404)
+        self.assertNotIn("builder", mcp_bridge.get_all_roles())
+
+    def test_set_agent_role_returns_503_when_router_sync_unavailable(self):
+        app.registry = RuntimeRegistry(data_dir="./data/test")
+        app.router = None
+
+        with self.assertLogs(app.log, level="ERROR") as captured:
+            response = asyncio.run(app.set_agent_role("builder", FakeRequest({"role": "Reviewer"})))
+
+        self.assertEqual(response.status_code, 503)
+        self.assertIn("Router metadata sync unavailable for set_agent_role", captured.output[0])
+
+    def test_deregister_agent_invokes_router_sync(self):
+        app.config = {
+            "agents": {"builder": {"provider": "codex", "label": "Builder"}},
+        }
+        with tempfile.TemporaryDirectory() as tmp:
+            registry = RuntimeRegistry(data_dir=tmp)
+            registry.seed(app.config["agents"])
+            registered = registry.register("builder")
+            app.registry = registry
+            app.router = Router(["builder"], default_mention="none")
+            request = FakeRequest(headers={"authorization": f"Bearer {registered['token']}"})
+
+            with mock.patch.object(app, "_sync_router_agents", return_value=True) as sync:
+                response = asyncio.run(app.deregister_agent("builder", request))
+
+        self.assertEqual(response.status_code, 200)
+        sync.assert_called_once_with(report_missing=True)
 
     def test_agent_ops_prefers_existing_legacy_live_session_for_default_prefix(self):
         app.config = {
