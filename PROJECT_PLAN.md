@@ -41,9 +41,12 @@ Implemented:
 - loop guard max/default increased to `100`
 - example team files for two-agent, large roster, API-agent, and project-a
 - operating guide at `TEAM_RUNNER_GUIDE.md`
-- Agent Operations UI with configured/running sections and attach command copy
+- Agent Operations UI with configured/running sections, attach command copy,
+  server/MCP/loop-guard status badges, and clearer mismatch warnings
 - project-aware UI metadata and document title
 - server-backed search and command palette
+- older search-result navigation that loads a bounded message-history window
+  before scrolling, with a return-to-live affordance
 
 Validated:
 
@@ -52,6 +55,7 @@ Validated:
 - project isolation for roles, labels, colors, tmux sessions, and shutdown
 - runner/config validation with pytest coverage
 - team/role routing with pytest coverage
+- Agent Operations payload and search-window navigation API coverage
 
 ## Phase 1: Stabilize Team Runner
 

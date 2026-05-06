@@ -2539,8 +2539,11 @@ async function returnToLiveHistory() {
             showToast('Unable to load live history', 'error');
             return false;
         }
+        if (!renderMessageSet(messages, 'return to live history')) {
+            showToast('Unable to load live history', 'error');
+            return false;
+        }
         clearHistoryWindowState();
-        if (!renderMessageSet(messages, 'return to live history')) return false;
         requestAnimationFrame(scrollToBottom);
         return true;
     } catch (err) {

@@ -407,3 +407,78 @@ labels, paths, and routable team/role metadata.
    plus clearer configured-vs-running warnings.
 3. Harden search navigation so selecting old results loads the surrounding
    message window before scrolling.
+
+---
+
+## 2026-05-06 02:03 EDT - Ops Routing Search Polish Closeout
+
+**Branch:** `main`
+**Base Commit:** `93a7f0a`
+**Commits:** `55a8566`
+
+### Summary
+
+Closed the post-runner polish slice that combined routing docs, Agent
+Operations visibility, and long-history search navigation. The main outcome is
+that users can route to teams/roles from documented syntax, inspect server/MCP
+and loop-guard health from Agent Operations, and jump to older search results
+even when the target message is not mounted in the current chat DOM.
+
+### Decisions
+
+- Keep `@team:<name>` and `@role:<name>` as documented routing syntax before
+  adding autocomplete hints.
+- Treat Agent Operations as the browser-visible view of the runner's tmux,
+  server, MCP, loop-guard, and configured-vs-running state.
+- Load older search results with a bounded server-side message window instead
+  of forcing a full page reload or relying on current DOM presence.
+- Make older-history navigation explicit with a visible banner and
+  return-to-live action so live messages are not silently mixed into a frozen
+  historical window.
+
+### Changes
+
+- Documented team and role routing in README, `TEAM_RUNNER_GUIDE.md`, and the
+  frontend smoke checklist.
+- Added Agent Operations service badges for Server, MCP HTTP, MCP SSE, and
+  Loop Guard.
+- Replaced flat mismatch text with clearer warning titles, details, and agent
+  tags.
+- Added `MessageStore.get_window_around()` and `GET /api/messages/window` for
+  bounded history windows around search targets.
+- Updated search-result activation to call a `navigateToMessage` bridge that
+  switches channels, loads missing history windows, and highlights the target.
+- Added an older-history banner with live-message waiting counts and a
+  `Return to live` flow.
+- Moved Agent Operations port probing off the event loop and tightened port
+  probe diagnostics.
+- Added request-level hardening follow-up coverage for bearer access to the
+  message-window route.
+
+### Verification
+
+- Ran `node --check static/chat.js`.
+- Ran `.venv/bin/python -m py_compile app.py`.
+- Ran `git diff --check`.
+- Ran `.venv/bin/python -m pytest tests/test_project_apis.py -q`; latest
+  validation passed `22` tests plus `4` subtests.
+- Ran `.venv/bin/python -m pytest -q`; latest validation passed `111` tests
+  plus `4` subtests.
+
+### Open Questions
+
+- The static frontend still has no JS test harness, so the older-history banner
+  and return-to-live behavior rely on syntax checks, backend/API tests, review,
+  and manual smoke testing.
+- Agent Operations now exposes useful status badges, but the runner CLI status
+  output should stay aligned so terminal and browser diagnostics tell the same
+  story.
+
+### Next Steps
+
+1. Browser-smoke test older search-result navigation, waiting live-message
+   counts, and return-to-live behavior with realistic long-history data.
+2. Keep request-level middleware coverage as the default for future bearer
+   allowlist changes.
+3. Move to the next runner/ops polish slice: one-agent restart, richer logs,
+   and status output alignment with Agent Operations.
