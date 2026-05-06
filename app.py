@@ -308,6 +308,7 @@ def configure(cfg: dict, session_token: str = ""):
         max_hops=max_hops,
         online_checker=lambda: set(registry.get_active_names()) if registry else set(),
     )
+    _sync_router_agents()
     agents = AgentTrigger(registry, data_dir=data_dir)
 
     # Sessions
@@ -403,6 +404,7 @@ def configure(cfg: dict, session_token: str = ""):
                                         "new_name": renamed["new"],
                                     })
                                     asyncio.run_coroutine_threadsafe(_broadcast(rename_event), _event_loop)
+                            _sync_router_agents()
                             store.add(name, f"{name} disconnected (timeout)", msg_type="leave", channel=_last_active_channel)
                             _posted_leave.add(name)
 
@@ -964,15 +966,49 @@ async def broadcast_agents():
     ws_clients.difference_update(dead)
 
 
+def _router_sync_unavailable_response(context: str) -> JSONResponse:
+    log.error(
+        "Router metadata sync unavailable for %s: router_configured=%s registry_configured=%s",
+        context,
+        router is not None,
+        registry is not None,
+    )
+    return JSONResponse({"error": "router metadata sync unavailable"}, status_code=503)
+
+
+def _require_router_sync(context: str) -> JSONResponse | None:
+    if router and registry:
+        return None
+    return _router_sync_unavailable_response(context)
+
+
+def _sync_router_agents(report_missing: bool = False) -> bool:
+    """Refresh agent names and team/role metadata; no-op until router and registry exist."""
+    if not router or not registry:
+        if report_missing:
+            log.error(
+                "Router metadata sync skipped: router_configured=%s registry_configured=%s",
+                router is not None,
+                registry is not None,
+            )
+        return False
+    base_names = list(registry.get_bases().keys())
+    # Only include active instances in routing (pending ones are inert).
+    instance_names = registry.get_active_names()
+    all_names = list(set(base_names + instance_names))
+    router.update_agents(all_names)
+    agent_cfg = registry.get_agent_config()
+    roles = mcp_bridge.get_all_roles()
+    router.update_agent_metadata(
+        teams={name: info.get("team", "") for name, info in agent_cfg.items()},
+        roles={name: roles.get(name, "") for name in instance_names},
+    )
+    return True
+
+
 def _on_registry_change():
     """Called from registry (any thread) when instances register/deregister/claim/rename."""
-    # Update router with current agent names (base names + registered instances)
-    if router and registry:
-        base_names = list(registry.get_bases().keys())
-        # Only include active instances in routing (pending ones are inert)
-        instance_names = registry.get_active_names()
-        all_names = list(set(base_names + instance_names))
-        router.update_agents(all_names)
+    _sync_router_agents()
     # Broadcast to WebSocket clients
     if _event_loop:
         asyncio.run_coroutine_threadsafe(broadcast_agents(), _event_loop)
@@ -1500,6 +1536,7 @@ async def websocket_endpoint(websocket: WebSocket):
                             # Migrate presence + cursors to new name
                             import mcp_bridge
                             mcp_bridge.migrate_identity(agent_name, new_id)
+                            _sync_router_agents()
                             # Update sender on all historical messages
                             store.rename_sender(agent_name, new_id)
                             # Notify clients so they can update sender in DOM
@@ -1539,6 +1576,7 @@ async def websocket_endpoint(websocket: WebSocket):
                                 registry.confirm_pending(new_id)
                                 import mcp_bridge
                                 mcp_bridge.migrate_identity(agent_name, new_id)
+                                _sync_router_agents()
                                 # Update sender on all historical messages
                                 store.rename_sender(agent_name, new_id)
                                 rename_event = json.dumps({
@@ -2259,12 +2297,19 @@ async def get_roles():
 async def set_agent_role(agent_name: str, request: Request):
     """Set or clear an agent's role."""
     import mcp_bridge
+    sync_error = _require_router_sync("set_agent_role")
+    if sync_error:
+        return sync_error
     try:
         body = await request.json()
     except Exception:
         return JSONResponse({"error": "invalid json"}, status_code=400)
+    if not registry.get_instance(agent_name):
+        return JSONResponse({"error": "agent not found"}, status_code=404)
     role = body.get("role", "").strip()
     mcp_bridge.set_role(agent_name, role)
+    if not _sync_router_agents(report_missing=True):
+        return _router_sync_unavailable_response("set_agent_role")
     await broadcast_status()
     return JSONResponse({"ok": True, "role": role})
 
@@ -2329,6 +2374,9 @@ async def register_agent(request: Request):
     label = body.get("label")
     if not base:
         return JSONResponse({"error": "base is required"}, status_code=400)
+    sync_error = _require_router_sync("register_agent")
+    if sync_error:
+        return sync_error
     result = registry.register(base, label)
     if result is None:
         return JSONResponse({"error": f"unknown base: {base}"}, status_code=400)
@@ -2351,6 +2399,8 @@ async def register_agent(request: Request):
                 "new_name": renamed["new"],
             })
             asyncio.run_coroutine_threadsafe(_broadcast(rename_event), _event_loop)
+    if not _sync_router_agents(report_missing=True):
+        return _router_sync_unavailable_response("register_agent")
     # Broadcast pending_instance event so UI can show naming lightbox
     if result.get("state") == "pending" and _event_loop:
         pending_event = json.dumps({
@@ -2367,6 +2417,9 @@ async def register_agent(request: Request):
 @app.post("/api/deregister/{name}")
 async def deregister_agent(name: str, request: Request):
     """Wrapper calls this on shutdown to remove its instance."""
+    sync_error = _require_router_sync("deregister_agent")
+    if sync_error:
+        return sync_error
     auth_inst = _resolve_authenticated_agent(request)
     presented_token = _extract_agent_token(request)
     if presented_token and not auth_inst:
@@ -2395,6 +2448,8 @@ async def deregister_agent(name: str, request: Request):
                 "new_name": renamed["new"],
             })
             asyncio.run_coroutine_threadsafe(_broadcast(rename_event), _event_loop)
+    if not _sync_router_agents(report_missing=True):
+        return _router_sync_unavailable_response("deregister_agent")
     return JSONResponse({"ok": True})
 
 
@@ -2408,6 +2463,9 @@ async def rename_agent_label(name: str, request: Request):
     label = body.get("label", "").strip()
     if not label:
         return JSONResponse({"error": "label is required"}, status_code=400)
+    sync_error = _require_router_sync("rename_agent_label")
+    if sync_error:
+        return sync_error
 
     import re as _re
     new_id = _re.sub(r'[^a-z0-9-]', '', label.lower().replace(' ', '-')).strip('-')
@@ -2417,6 +2475,8 @@ async def rename_agent_label(name: str, request: Request):
     if new_id == name:
         # Same ID — label-only change
         if registry.set_label(name, label):
+            if not _sync_router_agents(report_missing=True):
+                return _router_sync_unavailable_response("rename_agent_label")
             return JSONResponse({"ok": True})
         return JSONResponse({"error": "not found"}, status_code=404)
 
@@ -2424,11 +2484,15 @@ async def rename_agent_label(name: str, request: Request):
     if isinstance(result, str):
         # Rename failed — try label-only as fallback
         if registry.set_label(name, label):
+            if not _sync_router_agents(report_missing=True):
+                return _router_sync_unavailable_response("rename_agent_label")
             return JSONResponse({"ok": True, "warning": result})
         return JSONResponse({"error": result}, status_code=400)
 
     import mcp_bridge
     mcp_bridge.migrate_identity(name, new_id)
+    if not _sync_router_agents(report_missing=True):
+        return _router_sync_unavailable_response("rename_agent_label")
     # Update sender on all historical messages
     store.rename_sender(name, new_id)
     return JSONResponse({"ok": True, "new_name": new_id})

@@ -3,6 +3,16 @@
 import re
 
 
+_TEAM_ROLE_RE = re.compile(
+    r"@(team|role):([a-zA-Z0-9](?:[a-zA-Z0-9_.-]*[a-zA-Z0-9])?)(?=$|[\s.,;:!?)}\]])",
+    re.IGNORECASE,
+)
+
+
+def _metadata_key(value: str) -> str:
+    return re.sub(r"[\s_]+", "-", str(value).strip().lower())
+
+
 def _fence_at(text: str, idx: int) -> tuple[str, int] | None:
     ch = text[idx]
     if ch not in ("`", "~"):
@@ -76,6 +86,8 @@ class Router:
     def __init__(self, agent_names: list[str], default_mention: str = "both",
                  max_hops: int = 4, online_checker=None):
         self.agent_names = set(n.lower() for n in agent_names)
+        self._agent_teams: dict[str, str] = {}
+        self._agent_roles: dict[str, str] = {}
         self.default_mention = default_mention
         self.max_hops = max_hops
         self._online_checker = online_checker  # callable() -> set of online agent names
@@ -103,8 +115,18 @@ class Router:
     def parse_mentions(self, text: str) -> list[str]:
         text = _strip_markdown_code(text)
         mentions = set()
+        for match in _TEAM_ROLE_RE.finditer(text):
+            kind = match.group(1).lower()
+            value = _metadata_key(match.group(2))
+            metadata = self._agent_teams if kind == "team" else self._agent_roles
+            mentions.update(
+                name for name, current in metadata.items()
+                if current == value and name in self.agent_names
+            )
         for match in self._mention_re.finditer(text):
             name = match.group(1).lower()
+            if name in ("team", "role") and match.end() < len(text) and text[match.end()] == ":":
+                continue
             if name in ("both", "all"):
                 # Only tag online agents when using @all
                 if self._online_checker:
@@ -170,3 +192,17 @@ class Router:
         """Replace the agent name set and rebuild the mention regex."""
         self.agent_names = set(n.lower() for n in names)
         self._build_pattern()
+
+    def update_agent_metadata(self, teams: dict[str, str] | None = None,
+                              roles: dict[str, str] | None = None):
+        """Replace routing metadata used by @team:<name> and @role:<name>."""
+        self._agent_teams = {
+            str(name).lower(): _metadata_key(team)
+            for name, team in (teams or {}).items()
+            if isinstance(team, str) and team.strip()
+        }
+        self._agent_roles = {
+            str(name).lower(): _metadata_key(role)
+            for name, role in (roles or {}).items()
+            if isinstance(role, str) and role.strip()
+        }
