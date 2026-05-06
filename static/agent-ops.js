@@ -58,7 +58,7 @@
 
     function severityClass(value) {
         const raw = String(value || '').toLowerCase();
-        if (raw === 'ok' || raw === 'online' || raw === 'running' || raw === 'ready' || raw === 'listening') return 'online';
+        if (raw === 'ok' || raw === 'online' || raw === 'running' || raw === 'ready' || raw === 'listening' || raw === 'configured') return 'online';
         if (raw === 'down' || raw === 'error' || raw === 'stopped') return 'down';
         if (raw === 'warn' || raw === 'warning' || raw === 'busy' || raw === 'paused' || raw === 'closed') return 'warn';
         return '';

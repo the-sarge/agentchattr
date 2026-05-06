@@ -159,6 +159,11 @@ message actions, attachments, sessions, schedules, or navigation.
     loads a small history window around the message, then scrolls to and
     highlights it.
 
+- [ ] While viewing that older history window, send a new live message in the
+      same channel from another client or agent if available.
+  - Expected: the historical window stays stable, the banner reports waiting
+    live messages, and `Return to live` restores the recent timeline.
+
 ## Failure Report
 
 For any failure, record:

@@ -1,5 +1,6 @@
 import asyncio
 import os
+import socket
 import sys
 import json
 import tempfile
@@ -214,6 +215,13 @@ class ProjectApiPayloadTests(unittest.TestCase):
         self.assertEqual(running_builder["team"], "1")
         self.assertEqual(app.registry.get_agent_config()["builder"]["team"], "1")
 
+    def test_agent_ops_endpoint_builds_payload_off_event_loop(self):
+        with mock.patch.object(app.asyncio, "to_thread", new=mock.AsyncMock(return_value={"ok": True})) as to_thread:
+            payload = asyncio.run(app.get_agent_ops())
+
+        self.assertEqual(payload, {"ok": True})
+        to_thread.assert_called_once_with(app._agent_ops_payload)
+
     def test_agent_ops_team_survives_slot_one_rename(self):
         app.config = {
             "project": {"name": "demo", "tmux_prefix": "agentchattr-demo"},
@@ -281,6 +289,52 @@ class ProjectApiPayloadTests(unittest.TestCase):
         self.assertEqual(services["mcp-sse"]["severity"], "warn")
         self.assertEqual(services["loop-guard"]["status"], "paused")
         self.assertEqual(services["loop-guard"]["paused_channels"], ["debug"])
+
+    def test_agent_ops_server_badge_state_matrix(self):
+        app.config = {
+            "project": {"name": "demo", "tmux_prefix": "agentchattr-demo"},
+            "server": {"port": 8390, "host": "127.0.0.1", "data_dir": "./data/demo"},
+            "mcp": {"http_port": 8290, "sse_port": 8291},
+            "images": {"upload_dir": "./uploads/demo"},
+            "agents": {},
+        }
+        app.registry = RuntimeRegistry(data_dir="./data/test")
+        app.agents = AgentTrigger(app.registry, data_dir="./data/test")
+        app.router = Router([], max_hops=3)
+        cases = [
+            (True, True, "running", "ok"),
+            (False, True, "listening", "warn"),
+            (True, False, "tmux only", "warn"),
+            (False, False, "stopped", "down"),
+        ]
+        for tmux_running, port_open, status, severity in cases:
+            with self.subTest(tmux_running=tmux_running, port_open=port_open):
+                sessions = {"agentchattr-demo-server"} if tmux_running else set()
+                with mock.patch.object(app, "_tmux_sessions", return_value=sessions), \
+                        mock.patch.object(app, "_tcp_port_open", return_value=port_open):
+                    payload = app._agent_ops_payload()
+
+                server = next(svc for svc in payload["service_badges"] if svc["name"] == "server")
+                self.assertEqual(server["status"], status)
+                self.assertEqual(server["severity"], severity)
+
+    def test_tcp_port_open_validates_and_logs_unexpected_socket_errors(self):
+        self.assertFalse(app._tcp_port_open("127.0.0.1", 0))
+        self.assertFalse(app._tcp_port_open("127.0.0.1", "not-a-port"))
+        with mock.patch.object(app.socket, "create_connection", side_effect=ConnectionRefusedError):
+            self.assertFalse(app._tcp_port_open("127.0.0.1", 8390))
+        with mock.patch.object(app.socket, "create_connection", side_effect=socket.gaierror("bad host")):
+            with self.assertLogs(app.log, level="DEBUG") as captured:
+                self.assertFalse(app._tcp_port_open("bad.local", 8390))
+        self.assertIn("port probe failed for bad.local:8390: gaierror", captured.output[0])
+
+    def test_bearer_auth_allowlist_includes_message_window_only_for_read_api(self):
+        self.assertTrue(app._allows_bearer_auth("/api/messages"))
+        self.assertTrue(app._allows_bearer_auth("/api/messages/window"))
+        self.assertTrue(app._allows_bearer_auth("/api/send"))
+        self.assertTrue(app._allows_bearer_auth("/api/rules/active"))
+        self.assertFalse(app._allows_bearer_auth("/api/search"))
+        self.assertFalse(app._allows_bearer_auth("/api/export"))
 
     def test_sync_router_agents_includes_team_and_role_metadata(self):
         app.config = {

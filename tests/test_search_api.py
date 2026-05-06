@@ -96,6 +96,24 @@ class MessageSearchTests(unittest.TestCase):
         todo_row = next(m for m in payload["messages"] if m["id"] == messages[2]["id"])
         self.assertEqual(todo_row["todo_status"], "todo")
 
+    def test_message_window_boundaries_and_clamps(self):
+        messages = [
+            self.store.add("alice", f"msg {i}", channel="general")
+            for i in range(3)
+        ]
+
+        first = self.store.get_window_around(messages[0]["id"], before=5, after=0)
+        last = self.store.get_window_around(messages[-1]["id"], before=-5, after=-1)
+        missing = self.store.get_window_around(999, before=1, after=1)
+
+        self.assertEqual([m["id"] for m in first["messages"]], [messages[0]["id"]])
+        self.assertFalse(first["has_before"])
+        self.assertTrue(first["has_after"])
+        self.assertEqual([m["id"] for m in last["messages"]], [messages[-1]["id"]])
+        self.assertTrue(last["has_before"])
+        self.assertFalse(last["has_after"])
+        self.assertIsNone(missing)
+
     def test_api_message_window_404s_when_target_not_found_in_channel(self):
         old_store = app.store
         try:

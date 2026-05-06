@@ -187,6 +187,11 @@ def _resolve_authenticated_agent(request: Request) -> dict | None:
 # --- Security middleware ---
 # Paths that don't require the session token (public assets).
 _PUBLIC_PREFIXES = ("/", "/static/")
+_BEARER_AUTH_PATHS = {"/api/messages", "/api/messages/window", "/api/send"}
+
+
+def _allows_bearer_auth(path: str) -> bool:
+    return path in _BEARER_AUTH_PATHS or path.startswith("/api/rules/")
 
 
 def _install_security_middleware(token: str, cfg: dict):
@@ -231,7 +236,7 @@ def _install_security_middleware(token: str, cfg: dict):
             # Allow registered agents to authenticate via Bearer token
             # for read-only message APIs and /api/send (no browser session needed).
             auth_header = request.headers.get("authorization", "")
-            if auth_header.lower().startswith("bearer ") and (path in ("/api/messages", "/api/messages/window", "/api/send") or path.startswith("/api/rules/")):
+            if auth_header.lower().startswith("bearer ") and _allows_bearer_auth(path):
                 bearer = auth_header[7:].strip()
                 if _self.registry and _self.registry.resolve_token(bearer):
                     return await call_next(request)
@@ -1069,6 +1074,7 @@ def _project_payload() -> dict:
             "port": int(server.get("port", 8300)),
         },
         "mcp": {
+            "host": str(mcp.get("host", "127.0.0.1")),
             "http_port": int(mcp.get("http_port", 8200)),
             "sse_port": int(mcp.get("sse_port", 8201)),
         },
@@ -1103,7 +1109,10 @@ def _tcp_port_open(host: str, port: int | str, timeout: float = 0.08) -> bool:
     try:
         with socket.create_connection((connect_host, port_num), timeout=timeout):
             return True
-    except OSError:
+    except (ConnectionRefusedError, TimeoutError, socket.timeout):
+        return False
+    except OSError as err:
+        log.debug("port probe failed for %s:%s: %s", connect_host, port_num, type(err).__name__)
         return False
 
 
@@ -1244,7 +1253,9 @@ def _agent_ops_payload() -> dict:
 
     http_port = project["mcp"]["http_port"]
     sse_port = project["mcp"]["sse_port"]
-    mcp_host = "127.0.0.1"
+    # MCP servers bind to loopback by default; expose the probe host in the payload
+    # so the badge cannot silently diverge from what Agent Ops checked.
+    mcp_host = project["mcp"].get("host", "127.0.0.1")
     http_listening = _tcp_port_open(mcp_host, http_port)
     sse_listening = _tcp_port_open(mcp_host, sse_port)
     channels = room_settings.get("channels", ["general"])
@@ -1269,7 +1280,7 @@ def _agent_ops_payload() -> dict:
             "label": "MCP HTTP",
             "status": "listening" if http_listening else "closed",
             "severity": "ok" if http_listening else "warn",
-            "detail": str(http_port),
+            "detail": f"{mcp_host}:{http_port}",
             "listening": http_listening,
         },
         {
@@ -1277,7 +1288,7 @@ def _agent_ops_payload() -> dict:
             "label": "MCP SSE",
             "status": "listening" if sse_listening else "closed",
             "severity": "ok" if sse_listening else "warn",
-            "detail": str(sse_port),
+            "detail": f"{mcp_host}:{sse_port}",
             "listening": sse_listening,
         },
         {
@@ -1917,7 +1928,7 @@ async def get_project():
 
 @app.get("/api/agent-ops")
 async def get_agent_ops():
-    return _agent_ops_payload()
+    return await asyncio.to_thread(_agent_ops_payload)
 
 
 @app.get("/api/settings")
