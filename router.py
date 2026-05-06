@@ -3,6 +3,75 @@
 import re
 
 
+def _fence_at(text: str, idx: int) -> tuple[str, int] | None:
+    ch = text[idx]
+    if ch not in ("`", "~"):
+        return None
+    line_start = text.rfind("\n", 0, idx) + 1
+    prefix = text[line_start:idx]
+    if len(prefix) > 3 or prefix.strip(" "):
+        return None
+    run = 0
+    while idx + run < len(text) and text[idx + run] == ch:
+        run += 1
+    if run < 3:
+        return None
+    return ch, run
+
+
+def _skip_fenced_code(text: str, start: int, ch: str, length: int) -> int:
+    line_end = text.find("\n", start)
+    if line_end == -1:
+        return len(text)
+    pos = line_end + 1
+    while pos < len(text):
+        next_line = text.find("\n", pos)
+        line_end = len(text) if next_line == -1 else next_line
+        i = pos
+        spaces = 0
+        while i < line_end and text[i] == " " and spaces < 4:
+            i += 1
+            spaces += 1
+        if spaces <= 3:
+            run = 0
+            while i + run < line_end and text[i + run] == ch:
+                run += 1
+            if run >= length:
+                return line_end + (1 if next_line != -1 else 0)
+        if next_line == -1:
+            return len(text)
+        pos = next_line + 1
+    return len(text)
+
+
+def _strip_markdown_code(text: str) -> str:
+    parts = []
+    last = 0
+    i = 0
+    while i < len(text):
+        fence = _fence_at(text, i)
+        if fence:
+            parts.append(text[last:i])
+            i = _skip_fenced_code(text, i, fence[0], fence[1])
+            last = i
+            continue
+        if text[i] == "`":
+            run = 1
+            while i + run < len(text) and text[i + run] == "`":
+                run += 1
+            close = text.find("`" * run, i + run)
+            if close != -1:
+                parts.append(text[last:i])
+                i = close + run
+                last = i
+                continue
+            i += run
+            continue
+        i += 1
+    parts.append(text[last:])
+    return "".join(parts)
+
+
 class Router:
     def __init__(self, agent_names: list[str], default_mention: str = "both",
                  max_hops: int = 4, online_checker=None):
@@ -32,6 +101,7 @@ class Router:
         )
 
     def parse_mentions(self, text: str) -> list[str]:
+        text = _strip_markdown_code(text)
         mentions = set()
         for match in self._mention_re.finditer(text):
             name = match.group(1).lower()
