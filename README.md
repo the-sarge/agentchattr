@@ -481,6 +481,7 @@ For repeatable per-project rosters, create a team file in `teams/<project>.toml`
 ```bash
 ./ac list
 ./ac project-a up --dry-run
+./ac project-a check
 ./ac project-a up
 ./ac project-a status
 ./ac project-a attach architect
@@ -489,7 +490,12 @@ For repeatable per-project rosters, create a team file in `teams/<project>.toml`
 ./ac project-a down
 ```
 
-`ac project-a up` starts the server in a project-specific tmux session, then starts one wrapper per configured agent. CLI agents run in their own tmux sessions using the configured names, roles, labels, colors, ports, and data directory.
+`ac project-a check` validates the team file, known project port/prefix
+collisions, executable commands, and common path mistakes without starting
+anything. `ac project-a up` starts the server in a project-specific tmux
+session, writes server output to `data_dir/server.log`, then starts one wrapper
+per configured agent. CLI agents run in their own tmux sessions using the
+configured names, roles, labels, colors, ports, and data directory.
 
 Tmux sessions use a predictable naming convention:
 
@@ -562,7 +568,7 @@ label = "Research"
 role = "Researcher"
 ```
 
-`provider` selects the built-in wrapper behavior for aliases, so `provider = "claude"` works even when the handle is `architect`. If `command` is omitted, it defaults to the provider name. The team file's `[agents]` section replaces the default roster for that project. `[agent_defaults.<provider>]` applies shared fields to matching agents, and per-agent values override those defaults. `args = [...]` adds provider CLI arguments after agentchattr's MCP/config arguments. Optional `repo_url` and `board_url` fields show up in Agent Operations; `board_url` also replaces the Support link with a `Project Board` pill. Use `link_label` and `link_url` only when you want that pill to point somewhere else.
+`provider` selects the built-in wrapper behavior for aliases, so `provider = "claude"` works even when the handle is `architect`. If `command` is omitted, it defaults to the provider name. The team file's `[agents]` section replaces the default roster for that project. `[agent_defaults.<provider>]` applies shared fields to matching agents, and per-agent values override those defaults. `args = [...]` adds provider CLI arguments after agentchattr's MCP/config arguments. Labels must be unique within a team file. `role` and `team` values are routable with `@role:<name>` and `@team:<name>`; use letters, numbers, and single spaces, dots, underscores, or hyphens so the router can normalize them predictably. Optional `repo_url` and `board_url` fields show up in Agent Operations; `board_url` also replaces the Support link with a `Project Board` pill. Use `link_label` and `link_url` only when you want that pill to point somewhere else.
 
 Under the hood, `ac` sets `AGENTCHATTR_PROJECT_CONFIG` and `AGENTCHATTR_TMUX_PREFIX`. You can use `AGENTCHATTR_PROJECT_CONFIG=/path/to/team.toml python run.py` directly if you want to start the server by hand.
 

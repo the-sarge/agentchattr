@@ -202,6 +202,9 @@ Acceptance criteria:
 Objective: evaluate containerized project instances after the host workflow is
 stable.
 
+Status: postponed until the host/tmux runner, dry-run/preflight checks, and
+team config schema are reliable enough to reuse as Docker's launch planner.
+
 Recommended model:
 
 - one container per project
@@ -281,9 +284,10 @@ Manual tests:
 
 ## Near-Term Recommended Sequence
 
-1. Add `restart` and `logs` to `./ac`.
-2. Add team TOML validation and `up --dry-run`.
-3. Add Agent Operations UI with attach commands.
-4. Add project name/team file awareness to the UI.
-5. Extract settings/schedules from `chat.js` before adding larger UI features.
-6. Revisit Docker once the host-based team runner feels stable.
+1. Finish runner reliability polish around `restart`, `logs`, `list`, `check`,
+   and clear startup failure messages.
+2. Finish team TOML validation, dry-run output, duplicate port/prefix checks,
+   command checks, and path checks.
+3. Keep Agent Operations and project-awareness UI aligned with the runner's
+   tmux session model.
+4. Revisit Docker only after the host-based team runner feels stable.

@@ -130,9 +130,17 @@ def _tmux_sessions() -> list[str]:
 
 
 def _start_tmux_session(name: str, command: str) -> None:
-    subprocess.check_call([
-        "tmux", "new-session", "-d", "-s", name, "-c", str(ROOT), command,
-    ])
+    try:
+        subprocess.check_call([
+            "tmux", "new-session", "-d", "-s", name, "-c", str(ROOT), command,
+        ])
+    except FileNotFoundError as exc:
+        raise SystemExit("tmux executable not found on PATH; install tmux and retry.") from exc
+    except subprocess.CalledProcessError as exc:
+        raise SystemExit(
+            f"Failed to start tmux session {name} (exit {exc.returncode}).\n"
+            f"Command: {command}"
+        ) from exc
 
 
 def _kill_tmux_session(name: str) -> None:
@@ -224,6 +232,46 @@ def _command_missing(team: dict, agent: str) -> str | None:
     return f"{agent}: command not found on PATH: {command}"
 
 
+def _resolve_project_path(raw: str) -> Path:
+    path = Path(raw).expanduser()
+    if not path.is_absolute():
+        path = (ROOT / path).resolve()
+    return path
+
+
+def _server_log_path(team: dict) -> Path:
+    return _resolve_project_path(_data_dir(team)) / "server.log"
+
+
+def _command_with_server_log(command: str, log_path: Path) -> str:
+    return f"{command} 2>&1 | tee -a {shlex.quote(str(log_path))}"
+
+
+def _path_preflight_errors(team: dict) -> list[str]:
+    errors: list[str] = []
+    for label, raw in (
+        ("server.data_dir", _data_dir(team)),
+        ("images.upload_dir", _upload_dir(team)),
+    ):
+        path = _resolve_project_path(raw)
+        if path.exists() and not path.is_dir():
+            errors.append(f"{label} points to a file, not a directory: {path}")
+
+    for agent, cfg in team.get("agents", {}).items():
+        if _agent_is_api(team, agent):
+            continue
+        cwd = str(cfg.get("cwd", ".")).strip()
+        if not cwd:
+            errors.append(f"{agent}: cwd must be a non-empty string")
+            continue
+        path = _resolve_project_path(cwd)
+        if not path.exists():
+            errors.append(f"{agent}: cwd does not exist: {path}")
+        elif not path.is_dir():
+            errors.append(f"{agent}: cwd is not a directory: {path}")
+    return errors
+
+
 def _preflight_project(
     team: dict,
     prefix: str,
@@ -246,6 +294,8 @@ def _preflight_project(
             missing = _command_missing(team, agent)
             if missing:
                 errors.append(missing)
+
+    errors.extend(_path_preflight_errors(team))
 
     if check_ports:
         server_session = f"{prefix}-server"
@@ -274,6 +324,7 @@ def _print_dry_run(team_file: Path, team: dict, name: str, prefix: str, port: in
     print(f"MCP SSE: http://127.0.0.1:{sse_port}/sse")
     print(f"Data dir: {_data_dir(team)}")
     print(f"Upload dir: {_upload_dir(team)}")
+    print(f"Server log: {_server_log_path(team)}")
     print(f"Tmux prefix: {prefix}")
     print("Tmux sessions:")
     print(f"  server            {prefix}-server")
@@ -282,7 +333,8 @@ def _print_dry_run(team_file: Path, team: dict, name: str, prefix: str, port: in
         print(f"  {agent:<16} {live_session}")
         print(f"  {'wrapper:' + agent:<16} {wrapper_session}")
     print("Commands:")
-    print(f"  server            {_shell_command(env, ['.venv/bin/python', 'run.py'])}")
+    server_command = _command_with_server_log(_shell_command(env, ['.venv/bin/python', 'run.py']), _server_log_path(team))
+    print(f"  server            {server_command}")
     for agent in agents:
         cmd_args = _wrapper_cmd_args(".venv/bin/python", team, agent, prefix)
         print(f"  {agent:<16} {_shell_command(env, cmd_args)}")
@@ -331,11 +383,21 @@ def up(args) -> None:
     if _tmux_session_exists(server_session):
         print(f"Server already running: {server_session}")
     else:
-        command = _shell_command(env, [python, "run.py"])
+        server_log = _server_log_path(team)
+        try:
+            server_log.parent.mkdir(parents=True, exist_ok=True)
+        except OSError as exc:
+            raise SystemExit(f"Unable to create server log directory {server_log.parent}: {exc}") from exc
+        command = _command_with_server_log(_shell_command(env, [python, "run.py"]), server_log)
         _start_tmux_session(server_session, command)
         print(f"Started server: {server_session}")
         if not _wait_for_port(port):
-            raise SystemExit(f"Server did not start on port {port}. Check: tmux attach -t {server_session}")
+            raise SystemExit(
+                f"Server did not start on port {port} within 30s.\n"
+                f"Inspect server log: {server_log}\n"
+                f"If the tmux session is still present: ./ac {args.project} logs server --lines 120\n"
+                f"Attach directly if still present: tmux attach -t {server_session}"
+            )
 
     for agent in agents:
         _live_session, wrapper_session = _agent_sessions(prefix, agent)
@@ -349,6 +411,25 @@ def up(args) -> None:
     print(f"\n{name} is up: http://127.0.0.1:{port}")
     print(f"Team file: {team_file}")
     print(f"Sessions: tmux list-sessions | grep {shlex.quote(prefix)}")
+
+
+def check_project(args) -> None:
+    if sys.platform == "win32":
+        raise SystemExit("ac project check currently supports tmux-based Mac/Linux launches.")
+
+    team_file, team, name, prefix, port, agents = _project_context(args)
+    _preflight_project(team, prefix, require_tmux=True, check_ports=True, check_commands=True)
+    http_port, sse_port = _mcp_ports(team)
+    server_session = f"{prefix}-server"
+    server_already_running = shutil.which("tmux") and _tmux_session_exists(server_session)
+    if server_already_running:
+        print(f"{name} preflight OK (server already running; ports not re-checked)")
+    else:
+        print(f"{name} preflight OK")
+    print(f"Team file: {team_file}")
+    print(f"Tmux prefix: {prefix}")
+    print(f"Ports: web={port}, mcp_http={http_port}, mcp_sse={sse_port}")
+    print("Agents: " + ", ".join(agents))
 
 
 def down(args) -> None:
@@ -484,7 +565,7 @@ def attach(args) -> None:
 def main() -> None:
     parser = argparse.ArgumentParser(description="Start/stop project-specific agentchattr teams.")
     parser.add_argument("project", nargs="?", help="Project name or path to a team TOML file, or 'list'")
-    parser.add_argument("action", nargs="?", choices=("up", "down", "status", "attach", "restart", "logs"))
+    parser.add_argument("action", nargs="?", choices=("up", "down", "status", "attach", "restart", "logs", "check"))
     parser.add_argument("target", nargs="?", help="Target: agent name, server, wrapper:<agent>, or raw tmux session")
     parser.add_argument("-f", "--file", help="Explicit team TOML file")
     parser.add_argument("--dry-run", action="store_true", help="For up: print sessions, ports, paths, and commands without starting anything")
@@ -500,6 +581,8 @@ def main() -> None:
 
     if args.action == "up":
         up(args)
+    elif args.action == "check":
+        check_project(args)
     elif args.action == "down":
         down(args)
     elif args.action == "attach":
