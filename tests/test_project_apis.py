@@ -160,8 +160,8 @@ class ProjectApiPayloadTests(unittest.TestCase):
             "mcp": {"http_port": 8290, "sse_port": 8291},
             "images": {"upload_dir": "./uploads/demo"},
             "agents": {
-                "builder": {"provider": "codex", "label": "Builder", "color": "#10a37f", "role": "Builder"},
-                "reviewer": {"provider": "claude", "label": "Reviewer", "color": "#da7756"},
+                "builder": {"provider": "codex", "label": "Builder", "color": "#10a37f", "role": "Builder", "team": "1"},
+                "reviewer": {"provider": "claude", "label": "Reviewer", "color": "#da7756", "team": "2"},
             },
         }
         registry = RuntimeRegistry(data_dir="./data/test")
@@ -188,7 +188,41 @@ class ProjectApiPayloadTests(unittest.TestCase):
         self.assertTrue(builder["online"])
         self.assertTrue(builder["busy"])
         self.assertEqual(builder["registered_names"], ["builder"])
+        self.assertEqual(builder["team"], "1")
         self.assertIn("tmux attach -t agentchattr-demo-builder", builder["attach"]["live"])
+        running_builder = next(row for row in payload["registered_agents"] if row["name"] == "builder")
+        self.assertEqual(running_builder["team"], "1")
+        self.assertEqual(app.registry.get_agent_config()["builder"]["team"], "1")
+
+    def test_agent_ops_team_survives_slot_one_rename(self):
+        app.config = {
+            "project": {"name": "demo", "tmux_prefix": "agentchattr-demo"},
+            "server": {"port": 8390, "host": "127.0.0.1", "data_dir": "./data/demo"},
+            "mcp": {"http_port": 8290, "sse_port": 8291},
+            "images": {"upload_dir": "./uploads/demo"},
+            "agents": {
+                "builder": {"provider": "codex", "label": "Builder", "color": "#10a37f", "team": "1"},
+            },
+        }
+        with tempfile.TemporaryDirectory() as tmp:
+            registry = RuntimeRegistry(data_dir=tmp)
+            registry.seed(app.config["agents"])
+            registry.register("builder")
+            registry.register("builder")
+            app.registry = registry
+            app.agents = AgentTrigger(registry, data_dir=tmp)
+
+            with mock.patch.object(app, "_tmux_sessions", return_value={
+                "agentchattr-demo-builder",
+                "agentchattr-demo-builder-2",
+            }):
+                payload = app._agent_ops_payload()
+
+        rows = {row["name"]: row for row in payload["registered_agents"]}
+        self.assertEqual(rows["builder-1"]["team"], "1")
+        self.assertEqual(rows["builder-2"]["team"], "1")
+        self.assertEqual(app.registry.get_agent_config()["builder-1"]["team"], "1")
+        self.assertEqual(app.registry.get_agent_config()["builder-2"]["team"], "1")
 
     def test_agent_ops_prefers_existing_legacy_live_session_for_default_prefix(self):
         app.config = {

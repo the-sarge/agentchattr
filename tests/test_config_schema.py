@@ -87,6 +87,7 @@ provider = "codex"
 args = ["--profile", "work"]
 color = "#10a37f"
 role = "Builder"
+team = "1"
 """.strip(),
                 "utf-8",
             )
@@ -103,6 +104,7 @@ role = "Builder"
         self.assertEqual(config["project"]["link_url"], "https://github.com/orgs/the-sarge/projects/1/views/1")
         self.assertEqual(config["server"]["port"], 8310)
         self.assertEqual(list(config["agents"].keys()), ["builder"])
+        self.assertEqual(config["agents"]["builder"]["team"], "1")
         self.assertEqual(config["agents"]["builder"]["args"], ["--profile", "work"])
         self.assertEqual(config["agents"]["builder"]["command"], "codex")
 
@@ -124,6 +126,22 @@ role = "Builder"
         self.assertIn("accent_color", msg)
         self.assertIn("color", msg)
         self.assertIn("role", msg)
+
+    def test_invalid_agent_team_raises(self):
+        bad = {
+            "project": {"tmux_prefix": "agentchattr-bad-team"},
+            "server": {"port": 8300},
+            "agents": {
+                "bad": {
+                    "provider": "claude",
+                    "team": 1,
+                }
+            },
+        }
+        with self.assertRaises(config_loader.ConfigError) as ctx:
+            config_loader.validate_config(bad, source="bad-team.toml", require_project=True)
+
+        self.assertIn("team", str(ctx.exception))
 
     def test_invalid_project_urls_raise(self):
         bad = {

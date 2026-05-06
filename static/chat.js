@@ -776,6 +776,34 @@ function applyAgentConfig(data) {
     updateJobReplyTargetUI();
 }
 
+function agentTeamValue(cfg) {
+    return String(cfg?.team || '').trim();
+}
+
+function agentSortLabel(name, cfg) {
+    return String(cfg?.label || name).trim();
+}
+
+function compareAgentEntries(a, b) {
+    const [nameA, cfgA] = a;
+    const [nameB, cfgB] = b;
+    const teamA = agentTeamValue(cfgA);
+    const teamB = agentTeamValue(cfgB);
+    if (teamA || teamB) {
+        if (!teamA) return 1;
+        if (!teamB) return -1;
+        const teamCmp = teamA.localeCompare(teamB, undefined, { numeric: true, sensitivity: 'base' });
+        if (teamCmp) return teamCmp;
+    }
+    const labelCmp = agentSortLabel(nameA, cfgA).localeCompare(agentSortLabel(nameB, cfgB), undefined, { numeric: true, sensitivity: 'base' });
+    if (labelCmp) return labelCmp;
+    return nameA.localeCompare(nameB, undefined, { numeric: true, sensitivity: 'base' });
+}
+
+function sortedAgentEntries() {
+    return Object.entries(agentConfig).sort(compareAgentEntries);
+}
+
 function recolorMessages() {
     const msgs = document.querySelectorAll('.message[data-id]');
     for (const el of msgs) {
@@ -953,12 +981,13 @@ document.addEventListener('keydown', (e) => {
 function buildStatusPills() {
     const container = document.getElementById('agent-status');
     container.innerHTML = '';
-    for (const [name, cfg] of Object.entries(agentConfig)) {
+    for (const [name, cfg] of sortedAgentEntries()) {
         const pill = document.createElement('div');
         pill.className = 'status-pill';
         if (cfg.state === 'pending') pill.classList.add('pending');
         pill.id = `status-${name}`;
-        pill.title = `@${name}`;  // Tooltip: canonical name for manual @-typing
+        const teamTitle = agentTeamValue(cfg) ? ` · team ${agentTeamValue(cfg)}` : '';
+        pill.title = `@${name}${teamTitle}`;  // Tooltip: canonical name for manual @-typing
         pill.style.setProperty('--agent-color', colorOverrides[name] || cfg.color || '#4ade80');
         pill.innerHTML = `<span class="status-dot"></span><span class="status-label">${escapeHtml(cfg.label || name)}</span>`;
         // Left-click to toggle pill popover (rename + role + color)
@@ -970,7 +999,7 @@ function buildStatusPills() {
             const mode = cfg.state === 'pending' ? 'pending' : 'rename';
             showPillPopover(pill, {
                 name, label: cfg.label || name, color: cfg.color || '#888',
-                base: cfg.base || '', mode,
+                base: cfg.base || '', team: cfg.team || '', mode,
             });
         });
         container.appendChild(pill);
@@ -1926,9 +1955,9 @@ function selectSlashCommand(cmd) {
 function getMentionCandidates() {
     // Build list: registered agents + @all broadcast.
     const candidates = [];
-    for (const [name, cfg] of Object.entries(agentConfig)) {
+    for (const [name, cfg] of sortedAgentEntries()) {
         if (cfg.state === 'pending') continue;
-        candidates.push({ name, label: cfg.label || name, color: cfg.color });
+        candidates.push({ name, label: cfg.label || name, color: cfg.color, team: cfg.team || '' });
     }
     candidates.push({ name: 'all', label: 'all', color: 'var(--accent)' });
     return candidates;
@@ -2523,13 +2552,14 @@ function buildMentionToggles() {
         if (!(name in agentConfig)) activeMentions.delete(name);
     }
 
-    for (const [name, cfg] of Object.entries(agentConfig)) {
+    for (const [name, cfg] of sortedAgentEntries()) {
         if (cfg.state === 'pending') continue;  // skip pending instances
         const btn = document.createElement('button');
         btn.className = 'mention-toggle';
         btn.dataset.agent = name;
         btn.textContent = `@${cfg.label || name}`;
-        btn.title = `@${name}`;  // Tooltip: canonical name
+        const teamTitle = agentTeamValue(cfg) ? ` · team ${agentTeamValue(cfg)}` : '';
+        btn.title = `@${name}${teamTitle}`;  // Tooltip: canonical name
         btn.style.setProperty('--agent-color', colorOverrides[name] || cfg.color);
         // Restore active state for mentions that survived the rebuild
         if (activeMentions.has(name)) {
