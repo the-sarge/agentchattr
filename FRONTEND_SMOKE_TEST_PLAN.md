@@ -56,6 +56,35 @@ message actions, attachments, sessions, schedules, or navigation.
   - Expected: clipboard contains a working `tmux attach -t ...` command for
     the live agent session.
 
+## Team And Role Routing
+
+- [ ] Start a test team with at least two agents sharing a team, for example
+      `team = "1"`.
+  - Expected: the Agent Operations panel groups those agents together and shows
+    their team tags.
+
+- [ ] Send a disposable message with `@team:1`.
+  - Expected: every running agent on team `1` receives the trigger; agents on
+    other teams do not.
+
+- [ ] Send a disposable message with `@role:Builder`.
+  - Expected: running agents with role `Builder` receive the trigger; agents
+    with other roles do not.
+
+- [ ] Send a message that documents the same mentions in code, for example
+      ``Use `@team:1` and `@role:Builder` in the docs``.
+  - Expected: no agent is triggered by the code-quoted mentions.
+
+## Agent Operations
+
+- [ ] Open Agent Operations from the header.
+  - Expected: Services shows badges for Server, MCP HTTP, MCP SSE, and Loop
+    Guard.
+
+- [ ] Confirm configured/running warnings.
+  - Expected: configured-but-not-running, running-but-not-configured, and
+    wrapper-without-heartbeat warnings use clear explanatory text when present.
+
 ## Decision Cards
 
 - [ ] If you have an agent or MCP client handy, create a decision card with:
@@ -123,6 +152,17 @@ message actions, attachments, sessions, schedules, or navigation.
 - [ ] Search for a recent message.
   - Expected: result appears and selecting it navigates/highlights when the
     message is in the current DOM.
+
+- [ ] Search for an older message that is not currently mounted in the chat DOM.
+      A long channel or a hard refresh with limited history loaded is enough.
+  - Expected: selecting the result switches to the correct channel if needed,
+    loads a small history window around the message, then scrolls to and
+    highlights it.
+
+- [ ] While viewing that older history window, send a new live message in the
+      same channel from another client or agent if available.
+  - Expected: the historical window stays stable, the banner reports waiting
+    live messages, and `Return to live` restores the recent timeline.
 
 ## Failure Report
 

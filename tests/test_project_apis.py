@@ -1,5 +1,6 @@
 import asyncio
 import os
+import socket
 import sys
 import json
 import tempfile
@@ -201,6 +202,9 @@ class ProjectApiPayloadTests(unittest.TestCase):
 
         self.assertIn("reviewer", payload["mismatches"]["configured_not_registered"])
         self.assertIn("reviewer", payload["mismatches"]["wrapper_running_without_live_heartbeat"])
+        detail_kinds = {item["kind"] for item in payload["mismatches"]["details"]}
+        self.assertIn("configured_not_registered", detail_kinds)
+        self.assertIn("wrapper_running_without_live_heartbeat", detail_kinds)
         builder = next(row for row in payload["configured_agents"] if row["name"] == "builder")
         self.assertTrue(builder["online"])
         self.assertTrue(builder["busy"])
@@ -210,6 +214,13 @@ class ProjectApiPayloadTests(unittest.TestCase):
         running_builder = next(row for row in payload["registered_agents"] if row["name"] == "builder")
         self.assertEqual(running_builder["team"], "1")
         self.assertEqual(app.registry.get_agent_config()["builder"]["team"], "1")
+
+    def test_agent_ops_endpoint_builds_payload_off_event_loop(self):
+        with mock.patch.object(app.asyncio, "to_thread", new=mock.AsyncMock(return_value={"ok": True})) as to_thread:
+            payload = asyncio.run(app.get_agent_ops())
+
+        self.assertEqual(payload, {"ok": True})
+        to_thread.assert_called_once_with(app._agent_ops_payload)
 
     def test_agent_ops_team_survives_slot_one_rename(self):
         app.config = {
@@ -240,6 +251,90 @@ class ProjectApiPayloadTests(unittest.TestCase):
         self.assertEqual(rows["builder-2"]["team"], "1")
         self.assertEqual(app.registry.get_agent_config()["builder-1"]["team"], "1")
         self.assertEqual(app.registry.get_agent_config()["builder-2"]["team"], "1")
+
+    def test_agent_ops_service_badges_report_ports_and_loop_guard(self):
+        saved_room_settings = dict(app.room_settings)
+        try:
+            app.room_settings = {
+                **saved_room_settings,
+                "channels": ["general", "debug"],
+                "max_agent_hops": 3,
+            }
+            app.config = {
+                "project": {"name": "demo", "tmux_prefix": "agentchattr-demo"},
+                "server": {"port": 8390, "host": "127.0.0.1", "data_dir": "./data/demo"},
+                "mcp": {"http_port": 8290, "sse_port": 8291},
+                "images": {"upload_dir": "./uploads/demo"},
+                "agents": {},
+            }
+            app.registry = RuntimeRegistry(data_dir="./data/test")
+            app.agents = AgentTrigger(app.registry, data_dir="./data/test")
+            app.router = Router([], max_hops=3)
+            app.router._get_ch("debug")["paused"] = True
+
+            def port_open(_host, port, timeout=0.08):
+                return int(port) in {8390, 8290}
+
+            with mock.patch.object(app, "_tmux_sessions", return_value={"agentchattr-demo-server"}), \
+                    mock.patch.object(app, "_tcp_port_open", side_effect=port_open):
+                payload = app._agent_ops_payload()
+        finally:
+            app.room_settings = saved_room_settings
+
+        services = {svc["name"]: svc for svc in payload["service_badges"]}
+        self.assertEqual(services["server"]["status"], "running")
+        self.assertEqual(services["server"]["severity"], "ok")
+        self.assertEqual(services["mcp-http"]["status"], "listening")
+        self.assertEqual(services["mcp-sse"]["status"], "closed")
+        self.assertEqual(services["mcp-sse"]["severity"], "warn")
+        self.assertEqual(services["loop-guard"]["status"], "paused")
+        self.assertEqual(services["loop-guard"]["paused_channels"], ["debug"])
+
+    def test_agent_ops_server_badge_state_matrix(self):
+        app.config = {
+            "project": {"name": "demo", "tmux_prefix": "agentchattr-demo"},
+            "server": {"port": 8390, "host": "127.0.0.1", "data_dir": "./data/demo"},
+            "mcp": {"http_port": 8290, "sse_port": 8291},
+            "images": {"upload_dir": "./uploads/demo"},
+            "agents": {},
+        }
+        app.registry = RuntimeRegistry(data_dir="./data/test")
+        app.agents = AgentTrigger(app.registry, data_dir="./data/test")
+        app.router = Router([], max_hops=3)
+        cases = [
+            (True, True, "running", "ok"),
+            (False, True, "listening", "warn"),
+            (True, False, "tmux only", "warn"),
+            (False, False, "stopped", "down"),
+        ]
+        for tmux_running, port_open, status, severity in cases:
+            with self.subTest(tmux_running=tmux_running, port_open=port_open):
+                sessions = {"agentchattr-demo-server"} if tmux_running else set()
+                with mock.patch.object(app, "_tmux_sessions", return_value=sessions), \
+                        mock.patch.object(app, "_tcp_port_open", return_value=port_open):
+                    payload = app._agent_ops_payload()
+
+                server = next(svc for svc in payload["service_badges"] if svc["name"] == "server")
+                self.assertEqual(server["status"], status)
+                self.assertEqual(server["severity"], severity)
+
+    def test_tcp_port_open_validates_and_logs_unexpected_socket_errors(self):
+        self.assertFalse(app._tcp_port_open("127.0.0.1", 0))
+        self.assertFalse(app._tcp_port_open("127.0.0.1", "not-a-port"))
+        with mock.patch.object(app.socket, "create_connection", side_effect=ConnectionRefusedError):
+            self.assertFalse(app._tcp_port_open("127.0.0.1", 8390))
+        with mock.patch.object(app.socket, "create_connection", side_effect=socket.gaierror("bad host")):
+            with self.assertLogs(app.log, level="DEBUG") as captured:
+                self.assertFalse(app._tcp_port_open("bad.local", 8390))
+        self.assertIn("port probe failed for bad.local:8390: gaierror", captured.output[0])
+
+    def test_bearer_auth_allowlist_includes_message_window_only_for_read_api(self):
+        self.assertTrue(app._allows_bearer_auth("/api/messages"))
+        self.assertTrue(app._allows_bearer_auth("/api/messages/window"))
+        self.assertTrue(app._allows_bearer_auth("/api/send"))
+        self.assertTrue(app._allows_bearer_auth("/api/rules/active"))
+        self.assertFalse(app._allows_bearer_auth("/api/search"))
+        self.assertFalse(app._allows_bearer_auth("/api/export"))
 
     def test_sync_router_agents_includes_team_and_role_metadata(self):
         app.config = {

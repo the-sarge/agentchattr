@@ -751,6 +751,46 @@ main#timeline {
     gap: 6px;
 }
 
+.history-window-banner {
+    position: sticky;
+    top: 0;
+    z-index: 20;
+    display: flex;
+    align-items: center;
+    justify-content: space-between;
+    gap: 10px;
+    margin-bottom: 10px;
+    padding: 8px 10px;
+    border: 1px solid color-mix(in srgb, var(--accent) 40%, var(--border));
+    border-radius: var(--radius-md);
+    background: color-mix(in srgb, var(--bg-header) 92%, var(--accent));
+    color: var(--text-dim);
+    font-size: 12px;
+}
+
+.history-window-text {
+    min-width: 0;
+    overflow: hidden;
+    text-overflow: ellipsis;
+    white-space: nowrap;
+}
+
+.history-window-return {
+    flex-shrink: 0;
+    border: 1px solid color-mix(in srgb, var(--accent) 45%, var(--border));
+    border-radius: var(--radius-md);
+    background: var(--accent-soft);
+    color: var(--text);
+    cursor: pointer;
+    padding: 5px 8px;
+    font-size: 12px;
+    font-weight: 650;
+}
+
+.history-window-return:hover {
+    border-color: var(--accent);
+}
+
 .message {
     display: flex;
     align-items: flex-start;

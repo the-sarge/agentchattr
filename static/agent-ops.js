@@ -56,6 +56,14 @@
         return [...rows].sort(compareAgentRows);
     }
 
+    function severityClass(value) {
+        const raw = String(value || '').toLowerCase();
+        if (raw === 'ok' || raw === 'online' || raw === 'running' || raw === 'ready' || raw === 'listening' || raw === 'configured') return 'online';
+        if (raw === 'down' || raw === 'error' || raw === 'stopped') return 'down';
+        if (raw === 'warn' || raw === 'warning' || raw === 'busy' || raw === 'paused' || raw === 'closed') return 'warn';
+        return '';
+    }
+
     async function loadJson(path) {
         const resp = await fetch(path, { headers: authHeaders() });
         if (!resp.ok) throw new Error(`${path} ${resp.status}`);
@@ -133,10 +141,13 @@
         const rows = services.map(s => `
             <div class="agent-ops-service">
                 <div class="agent-ops-name">
-                    <span class="agent-ops-dot ${s.tmux_running === false ? 'warn' : 'online'}"></span>
+                    <span class="agent-ops-dot ${severityClass(s.severity || s.status || (s.tmux_running === false ? 'warn' : 'ok'))}"></span>
                     <span class="agent-ops-label">${escapeHtml(s.label || s.name)}</span>
                 </div>
-                <span class="agent-ops-meta">${escapeHtml(s.detail || s.status || '')}</span>
+                <div class="agent-ops-service-right">
+                    <span class="agent-ops-status ${severityClass(s.severity || s.status)}">${escapeHtml(s.status || '')}</span>
+                    <span class="agent-ops-meta">${escapeHtml(s.detail || '')}</span>
+                </div>
             </div>
         `).join('');
         return section('Services', `<div class="agent-ops-services">${rows}</div>`);
@@ -184,6 +195,9 @@
             : '<span class="agent-ops-tag">not registered</span>';
         const liveCommand = row.attach?.live || '';
         const wrapperCommand = row.attach?.wrapper || '';
+        const notes = [];
+        if (mismatch.configured_not_registered) notes.push('Configured in this team file, but no running agent has registered.');
+        if (mismatch.wrapper_running_without_live_heartbeat) notes.push('Wrapper tmux is running, but the agent has no live heartbeat.');
         return `
             <div class="agent-ops-row ${warn ? 'warn' : ''}">
                 <div class="agent-ops-row-top">
@@ -200,6 +214,7 @@
                     ${role}
                     ${registered}
                 </div>
+                ${notes.length ? `<div class="agent-ops-row-note">${notes.map(escapeHtml).join(' ')}</div>` : ''}
                 ${copyRow('Live', liveCommand)}
                 ${copyRow('Wrapper', wrapperCommand)}
             </div>
@@ -227,6 +242,7 @@
                         ${team}
                         <span class="agent-ops-tag">${escapeHtml(row.state || 'active')}</span>
                     </div>
+                    ${warn ? '<div class="agent-ops-row-note">Running now, but this base agent is not in the current team file.</div>' : ''}
                     ${copyRow('Live', row.attach?.live || '')}
                 </div>
             `;
@@ -234,6 +250,15 @@
     }
 
     function renderWarnings(mismatches) {
+        if (Array.isArray(mismatches.details) && mismatches.details.length) {
+            return section('Warnings', mismatches.details.map(item => `
+                <div class="agent-ops-row warn">
+                    <div class="agent-ops-warning-title">${escapeHtml(item.title || item.kind || 'Warning')}</div>
+                    <div class="agent-ops-warning-detail">${escapeHtml(item.detail || '')}</div>
+                    <div class="agent-ops-tags">${(item.names || []).map(name => `<span class="agent-ops-tag">${escapeHtml(name)}</span>`).join('')}</div>
+                </div>
+            `).join(''));
+        }
         const items = [];
         if ((mismatches.configured_not_registered || []).length) {
             items.push(`Configured but not registered: ${mismatches.configured_not_registered.map(escapeHtml).join(', ')}`);

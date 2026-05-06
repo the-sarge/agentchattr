@@ -18,6 +18,9 @@ let replyingTo = null;  // { id, sender, text } or null
 let unreadCount = 0;    // messages received while scrolled up
 let soundEnabled = false;  // suppress sounds during initial history load
 let activeChannel = localStorage.getItem('agentchattr-channel') || 'general';
+let historyWindow = { active: false, channel: '', targetId: null, startId: null, endId: null, pendingLiveCount: 0 };
+let suppressScrollToBottom = false;
+let navigationSwitchInProgress = false;
 let channelList = ['general'];
 let channelUnread = {};  // { channelName: count }
 let agentHats = {};  // { agent_name: svg_string }
@@ -37,7 +40,15 @@ Object.defineProperty(window, 'SESSION_TOKEN', { get() { return SESSION_TOKEN; }
 Object.defineProperty(window, 'activeChannel', { get() { return activeChannel; } });
 Object.defineProperty(window, 'channelList', { get() { return channelList; }, set(v) { channelList = v; } });
 Object.defineProperty(window, 'channelUnread', { get() { return channelUnread; }, set(v) { channelUnread = v; } });
-window._setActiveChannel = function(v) { activeChannel = v; };
+window._setActiveChannel = function(v) {
+    if (historyWindow.active && v !== historyWindow.channel) {
+        clearHistoryWindowState();
+        if (!navigationSwitchInProgress) {
+            setTimeout(() => returnToLiveHistory(), 0);
+        }
+    }
+    activeChannel = v;
+};
 // scrollToBottom is set after function definition (see below)
 Object.defineProperty(window, 'username', { get() { return username; } });
 window._setUsername = function(v) {
@@ -443,6 +454,7 @@ function connectWebSocket() {
             if (soundEnabled && !document.hasFocus() && event.data.type !== 'join' && event.data.type !== 'leave' && event.data.type !== 'summary' && event.data.sender && !isSelfSender(event.data.sender)) {
                 window.playNotificationSound(event.data.sender);
             }
+            if (holdLiveMessageForHistoryWindow(event.data)) return;
             const appendMessage = getMessageRenderingMethod('appendMessage', 'message event');
             if (appendMessage) appendMessage(event.data);
         } else if (event.type === 'agent_renamed') {
@@ -723,6 +735,7 @@ function colorMentions(textHtml) {
 }
 
 function scrollToBottom() {
+    if (suppressScrollToBottom) return;
     const timeline = document.getElementById('timeline');
     timeline.scrollTop = timeline.scrollHeight;
     unreadCount = 0;
@@ -2333,12 +2346,210 @@ function cancelReply() {
 
 function scrollToMessage(msgId) {
     const el = document.querySelector(`.message[data-id="${msgId}"]`);
-    if (!el) return;
+    if (!el) return false;
     el.scrollIntoView({ behavior: 'smooth', block: 'center' });
     el.classList.add('highlight');
     setTimeout(() => el.classList.remove('highlight'), 1500);
+    return true;
 }
 window.scrollToMessage = scrollToMessage;
+
+async function navigateToMessage(msgId, channel) {
+    const targetId = String(msgId ?? '').trim();
+    if (!targetId) return false;
+    const targetChannel = String(channel || 'general');
+    if (!switchChannelForNavigation(targetChannel)) return false;
+    if (scrollToMessage(targetId)) return true;
+    return loadMessageWindowForTarget(targetId, targetChannel);
+}
+
+function switchChannelForNavigation(channel) {
+    if (activeChannel === channel) return true;
+    if (typeof window.switchChannel !== 'function') {
+        console.error('Message navigation: switchChannel bridge not registered');
+        showToast('Unable to switch channels for message navigation', 'error');
+        return false;
+    }
+    try {
+        navigationSwitchInProgress = true;
+        window.switchChannel(channel);
+        return true;
+    } catch (err) {
+        console.error('Message navigation: failed to switch channel', err);
+        showToast('Unable to switch channels for message navigation', 'error');
+        return false;
+    } finally {
+        navigationSwitchInProgress = false;
+    }
+}
+
+async function loadMessageWindowForTarget(msgId, channel) {
+    const params = new URLSearchParams({
+        message_id: String(msgId),
+        before: '80',
+        after: '40',
+        channel: String(channel || ''),
+    });
+    try {
+        const resp = await fetch(`/api/messages/window?${params.toString()}`, {
+            headers: { 'X-Session-Token': SESSION_TOKEN },
+        });
+        if (!resp.ok) {
+            showToast(resp.status === 404 ? 'Message is no longer available' : 'Unable to load message history', 'error');
+            return false;
+        }
+        const payload = await resp.json();
+        const messages = Array.isArray(payload.messages) ? payload.messages : [];
+        if (!messages.length) {
+            console.error('Message navigation returned an empty window', payload);
+            showToast('Unable to load message history', 'error');
+            return false;
+        }
+        if (payload.channel && !switchChannelForNavigation(payload.channel)) return false;
+        const rendered = renderMessageSet(messages, 'message window navigation');
+        if (!rendered) return false;
+        setHistoryWindowState({
+            channel: payload.channel || channel || 'general',
+            targetId: msgId,
+            startId: payload.start_id,
+            endId: payload.end_id,
+        });
+        const found = await waitForMessageAndScroll(msgId);
+        if (!found) showToast('Loaded history, but the target message was not rendered', 'error');
+        return found;
+    } catch (err) {
+        console.error('Message navigation failed', err);
+        showToast('Unable to load message history', 'error');
+        return false;
+    }
+}
+window.navigateToMessage = navigateToMessage;
+
+function renderMessageSet(messages, context) {
+    const container = document.getElementById('messages');
+    if (!container) {
+        console.error('Message navigation: #messages element not found');
+        return false;
+    }
+    const resetDateState = getMessageRenderingMethod('resetDateState', context);
+    if (resetDateState) resetDateState();
+    const appendMessage = getMessageRenderingMethod('appendMessage', context);
+    if (!appendMessage) return false;
+    container.innerHTML = '';
+    const previousAutoScroll = autoScroll;
+    const previousSuppressScroll = suppressScrollToBottom;
+    try {
+        autoScroll = true;
+        suppressScrollToBottom = true;
+        messages.forEach(msg => {
+            if (msg.todo_status) todos[msg.id] = msg.todo_status;
+            appendMessage(msg);
+        });
+    } finally {
+        autoScroll = previousAutoScroll;
+        suppressScrollToBottom = previousSuppressScroll;
+    }
+    window.filterMessagesByChannel?.();
+    return true;
+}
+
+async function waitForMessageAndScroll(msgId, timeoutMs = 350) {
+    const start = performance.now();
+    while (performance.now() - start < timeoutMs) {
+        if (scrollToMessage(msgId)) return true;
+        await new Promise(resolve => requestAnimationFrame(resolve));
+    }
+    return scrollToMessage(msgId);
+}
+
+function setHistoryWindowState(state) {
+    historyWindow = {
+        active: true,
+        channel: String(state.channel || 'general'),
+        targetId: state.targetId,
+        startId: state.startId,
+        endId: state.endId,
+        pendingLiveCount: 0,
+    };
+    renderHistoryWindowBanner();
+}
+
+function clearHistoryWindowState() {
+    historyWindow = { active: false, channel: '', targetId: null, startId: null, endId: null, pendingLiveCount: 0 };
+    const banner = document.getElementById('history-window-banner');
+    if (banner) banner.remove();
+}
+
+function renderHistoryWindowBanner() {
+    let banner = document.getElementById('history-window-banner');
+    if (!historyWindow.active) {
+        if (banner) banner.remove();
+        return;
+    }
+    const timeline = document.getElementById('timeline');
+    const messages = document.getElementById('messages');
+    if (!timeline || !messages) return;
+    if (!banner) {
+        banner = document.createElement('div');
+        banner.id = 'history-window-banner';
+        banner.className = 'history-window-banner';
+        banner.innerHTML = `
+            <div class="history-window-text"></div>
+            <button type="button" class="history-window-return">Return to live</button>
+        `;
+        banner.querySelector('.history-window-return').addEventListener('click', () => {
+            returnToLiveHistory();
+        });
+        timeline.insertBefore(banner, messages);
+    }
+    const countText = historyWindow.pendingLiveCount
+        ? ` ${historyWindow.pendingLiveCount} new live message${historyWindow.pendingLiveCount === 1 ? '' : 's'} waiting.`
+        : '';
+    const text = banner.querySelector('.history-window-text');
+    if (text) {
+        text.textContent = `Viewing older #${historyWindow.channel} history around #${historyWindow.targetId}.${countText}`;
+    }
+}
+
+function holdLiveMessageForHistoryWindow(msg) {
+    if (!historyWindow.active || !msg) return false;
+    const msgChannel = msg.channel || 'general';
+    if (msgChannel !== historyWindow.channel) return false;
+    if (Number(msg.id) <= Number(historyWindow.endId || -1)) return false;
+    historyWindow.pendingLiveCount += 1;
+    renderHistoryWindowBanner();
+    return true;
+}
+
+async function returnToLiveHistory() {
+    const channel = historyWindow.channel || activeChannel || 'general';
+    const params = new URLSearchParams({ limit: '200', channel });
+    try {
+        if (!switchChannelForNavigation(channel)) return false;
+        const resp = await fetch(`/api/messages?${params.toString()}`, {
+            headers: { 'X-Session-Token': SESSION_TOKEN },
+        });
+        if (!resp.ok) {
+            showToast('Unable to load live history', 'error');
+            return false;
+        }
+        const messages = await resp.json();
+        if (!Array.isArray(messages)) {
+            console.error('Return to live returned non-array payload', messages);
+            showToast('Unable to load live history', 'error');
+            return false;
+        }
+        clearHistoryWindowState();
+        if (!renderMessageSet(messages, 'return to live history')) return false;
+        requestAnimationFrame(scrollToBottom);
+        return true;
+    } catch (err) {
+        console.error('Return to live failed', err);
+        showToast('Unable to load live history', 'error');
+        return false;
+    }
+}
+window.returnToLiveHistory = returnToLiveHistory;
 
 // Pin/todo actions and panel rendering live in pins-todos.js.
 

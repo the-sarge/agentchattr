@@ -78,6 +78,56 @@ class MessageSearchTests(unittest.TestCase):
         finally:
             app.store = old_store
 
+    def test_message_window_returns_target_slice_with_todo_status(self):
+        messages = [
+            self.store.add("alice", f"general {i}", channel="general")
+            for i in range(6)
+        ]
+        self.store.add("bob", "other channel", channel="random")
+        self.assertTrue(self.store.add_todo(messages[2]["id"]))
+
+        payload = self.store.get_window_around(messages[3]["id"], before=2, after=1, channel="general")
+
+        self.assertEqual([m["id"] for m in payload["messages"]], [1, 2, 3, 4])
+        self.assertEqual(payload["target_id"], messages[3]["id"])
+        self.assertEqual(payload["channel"], "general")
+        self.assertTrue(payload["has_before"])
+        self.assertTrue(payload["has_after"])
+        todo_row = next(m for m in payload["messages"] if m["id"] == messages[2]["id"])
+        self.assertEqual(todo_row["todo_status"], "todo")
+
+    def test_message_window_boundaries_and_clamps(self):
+        messages = [
+            self.store.add("alice", f"msg {i}", channel="general")
+            for i in range(3)
+        ]
+
+        first = self.store.get_window_around(messages[0]["id"], before=5, after=0)
+        last = self.store.get_window_around(messages[-1]["id"], before=-5, after=-1)
+        missing = self.store.get_window_around(999, before=1, after=1)
+
+        self.assertEqual([m["id"] for m in first["messages"]], [messages[0]["id"]])
+        self.assertFalse(first["has_before"])
+        self.assertTrue(first["has_after"])
+        self.assertEqual([m["id"] for m in last["messages"]], [messages[-1]["id"]])
+        self.assertTrue(last["has_before"])
+        self.assertFalse(last["has_after"])
+        self.assertIsNone(missing)
+
+    def test_api_message_window_404s_when_target_not_found_in_channel(self):
+        old_store = app.store
+        try:
+            app.store = self.store
+            msg = self.store.add("alice", "find me", channel="general")
+
+            ok_payload = asyncio.run(app.get_message_window(message_id=msg["id"], before=1, after=1, channel="general"))
+            missing = asyncio.run(app.get_message_window(message_id=msg["id"], channel="random"))
+
+            self.assertEqual(ok_payload["target_id"], msg["id"])
+            self.assertEqual(missing.status_code, 404)
+        finally:
+            app.store = old_store
+
 
 if __name__ == "__main__":
     unittest.main()

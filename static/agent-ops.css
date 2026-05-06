@@ -122,6 +122,7 @@
 .agent-ops-dot.online { background: var(--online); }
 .agent-ops-dot.busy { background: var(--warning); }
 .agent-ops-dot.warn { background: var(--pending); }
+.agent-ops-dot.down { background: var(--danger); }
 
 .agent-ops-label {
     color: var(--text);
@@ -139,6 +140,41 @@
     overflow: hidden;
     text-overflow: ellipsis;
     white-space: nowrap;
+}
+
+.agent-ops-service-right {
+    display: flex;
+    align-items: center;
+    justify-content: flex-end;
+    gap: 6px;
+    min-width: 0;
+}
+
+.agent-ops-status {
+    flex-shrink: 0;
+    padding: 2px 6px;
+    border: 1px solid var(--border-subtle);
+    border-radius: var(--radius-sm);
+    color: var(--text-dim);
+    background: var(--white-06);
+    font-size: 11px;
+    line-height: 1.2;
+    text-transform: lowercase;
+}
+
+.agent-ops-status.online {
+    border-color: color-mix(in srgb, var(--online) 45%, var(--border));
+    color: var(--online);
+}
+
+.agent-ops-status.warn {
+    border-color: color-mix(in srgb, var(--pending) 45%, var(--border));
+    color: var(--pending);
+}
+
+.agent-ops-status.down {
+    border-color: color-mix(in srgb, var(--danger) 45%, var(--border));
+    color: var(--danger);
 }
 
 .agent-ops-setting .agent-ops-meta {
@@ -202,6 +238,19 @@
     color: var(--text-dim);
     background: var(--white-06);
     font-size: 11px;
+}
+
+.agent-ops-row-note,
+.agent-ops-warning-detail {
+    color: var(--text-muted);
+    font-size: 12px;
+    line-height: 1.35;
+}
+
+.agent-ops-warning-title {
+    color: var(--text);
+    font-size: 13px;
+    font-weight: 700;
 }
 
 .agent-ops-copy-row {
