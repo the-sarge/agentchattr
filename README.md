@@ -513,6 +513,12 @@ For normal manual intervention, attach to the live agent session:
 
 Use `./ac project-a attach wrapper:architect` only when debugging the wrapper process itself.
 
+`./ac project-a status` mirrors the Agent Operations model from the terminal:
+service rows for Server/MCP HTTP/MCP SSE, per-agent live/wrapper tmux state,
+and warnings for wrapper-only, live-only, or unexpected prefixed sessions.
+`./ac project-a logs server` reads the persisted `data_dir/server.log` first,
+so server startup crashes remain visible even after the tmux pane exits.
+
 Example `teams/project-a.toml`:
 
 ```toml

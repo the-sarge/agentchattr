@@ -26,6 +26,10 @@ Implemented:
 - `./ac <project> up/status/attach/down/restart/logs/check`
 - `./ac list`
 - `./ac <project> up --dry-run`
+- `./ac <project> status` output aligned with Agent Operations service and
+  live/wrapper session states
+- `./ac <project> logs server` reads persisted `data_dir/server.log` even if
+  the server tmux pane has exited
 - team TOML config overlays via `AGENTCHATTR_PROJECT_CONFIG`
 - project-specific tmux prefixes via `AGENTCHATTR_TMUX_PREFIX`
 - provider aliases such as `provider = "claude"` for custom handles

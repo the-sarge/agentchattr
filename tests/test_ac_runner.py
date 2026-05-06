@@ -111,6 +111,63 @@ args = ["--quiet"]
         self.assertEqual(calls[0], ["tmux", "capture-pane", "-p", "-t", "agentchattr-demo-wrap-builder", "-S", "-50"])
         self.assertEqual(buf.getvalue().strip(), "line")
 
+    def test_logs_server_reads_persisted_log_without_tmux(self):
+        args = types.SimpleNamespace(project="demo", file="/tmp/demo.toml", target="server", lines=2)
+        with tempfile.TemporaryDirectory() as tmp:
+            log_path = Path(tmp) / "server.log"
+            log_path.write_text("one\ntwo\nthree\n", "utf-8")
+            team = {
+                "project": {"name": "demo", "tmux_prefix": "agentchattr-demo"},
+                "server": {"port": 8390, "data_dir": tmp},
+                "agents": {"builder": {"command": "python"}},
+            }
+
+            with mock.patch.object(self.ac, "_project_context", return_value=(Path("/tmp/demo.toml"), team, "demo", "agentchattr-demo", 8390, ["builder"])), \
+                    mock.patch.object(self.ac, "_check_tmux") as check_tmux:
+                buf = io.StringIO()
+                with redirect_stdout(buf):
+                    self.ac.logs(args)
+
+        check_tmux.assert_not_called()
+        self.assertEqual(buf.getvalue().strip(), "two\nthree")
+
+    def test_logs_server_reports_empty_persisted_log(self):
+        args = types.SimpleNamespace(project="demo", file="/tmp/demo.toml", target="server", lines=2)
+        with tempfile.TemporaryDirectory() as tmp:
+            log_path = Path(tmp) / "server.log"
+            log_path.write_text("", "utf-8")
+            team = {
+                "project": {"name": "demo", "tmux_prefix": "agentchattr-demo"},
+                "server": {"port": 8390, "data_dir": tmp},
+                "agents": {"builder": {"command": "python"}},
+            }
+
+            with mock.patch.object(self.ac, "_project_context", return_value=(Path("/tmp/demo.toml"), team, "demo", "agentchattr-demo", 8390, ["builder"])), \
+                    mock.patch.object(self.ac, "_check_tmux") as check_tmux:
+                buf = io.StringIO()
+                with redirect_stdout(buf):
+                    self.ac.logs(args)
+
+        check_tmux.assert_not_called()
+        self.assertIn("(server log is empty:", buf.getvalue())
+
+    def test_logs_missing_live_agent_hints_at_wrapper_logs(self):
+        args = types.SimpleNamespace(project="demo", file="/tmp/demo.toml", target="builder", lines=50)
+        team = {"project": {"name": "demo", "tmux_prefix": "agentchattr-demo"}, "server": {"port": 8390}, "agents": {"builder": {"command": "python"}}}
+
+        def session_exists(session):
+            return session == "agentchattr-demo-wrap-builder"
+
+        with mock.patch.object(self.ac, "_project_context", return_value=(Path("/tmp/demo.toml"), team, "demo", "agentchattr-demo", 8390, ["builder"])), \
+                mock.patch.object(self.ac, "_check_tmux"), \
+                mock.patch.object(self.ac, "_tmux_session_exists", side_effect=session_exists):
+            with self.assertRaises(SystemExit) as ctx:
+                self.ac.logs(args)
+
+        msg = str(ctx.exception)
+        self.assertIn("tmux session not found: agentchattr-demo-builder", msg)
+        self.assertIn("./ac demo logs wrapper:builder", msg)
+
     def test_restart_targets_only_requested_agent_sessions(self):
         args = types.SimpleNamespace(project="demo", file="/tmp/demo.toml", target="builder")
         team = {
@@ -230,6 +287,46 @@ args = ["--quiet"]
         self.assertIn("Inspect server log:", msg)
         self.assertIn("server.log", msg)
         self.assertIn("If the tmux session is still present: ./ac demo logs server --lines 120", msg)
+
+    def test_status_reports_service_agent_and_warning_states(self):
+        args = types.SimpleNamespace(project="demo", file="/tmp/demo.toml")
+        team = {
+            "project": {"name": "demo", "tmux_prefix": "agentchattr-demo"},
+            "server": {"host": "127.0.0.1", "port": 8390},
+            "mcp": {"http_port": 8290, "sse_port": 8291},
+            "agents": {
+                "builder": {"command": "python"},
+                "reviewer": {"command": "python"},
+            },
+        }
+        sessions = [
+            "agentchattr-demo-server",
+            "agentchattr-demo-wrap-builder",
+            "agentchattr-demo-reviewer",
+            "agentchattr-demo-old-agent",
+        ]
+
+        def port_open(_host, port):
+            return int(port) in {8390, 8291}
+
+        with mock.patch.object(self.ac, "_project_context", return_value=(Path("/tmp/demo.toml"), team, "demo", "agentchattr-demo", 8390, ["builder", "reviewer"])), \
+                mock.patch.object(self.ac, "_check_tmux"), \
+                mock.patch.object(self.ac, "_tmux_sessions", return_value=sessions), \
+                mock.patch.object(self.ac, "_host_port_open", side_effect=port_open):
+            buf = io.StringIO()
+            with redirect_stdout(buf):
+                self.ac.status(args)
+
+        out = buf.getvalue()
+        self.assertIn("Services:", out)
+        self.assertIn("Server     running", out)
+        self.assertIn("MCP HTTP   closed", out)
+        self.assertIn("MCP SSE    listening", out)
+        self.assertIn("builder          wrapper only", out)
+        self.assertIn("reviewer         live only", out)
+        self.assertIn("running but not configured: agentchattr-demo-old-agent", out)
+        self.assertIn("builder: wrapper running without live agent session", out)
+        self.assertIn("reviewer: live agent session running without wrapper supervisor", out)
 
 
 if __name__ == "__main__":

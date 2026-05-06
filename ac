@@ -13,6 +13,7 @@ By default, project-a resolves to teams/project-a.toml.
 from __future__ import annotations
 
 import argparse
+from collections import deque
 import os
 import re
 import shlex
@@ -82,6 +83,14 @@ def _server_port(team: dict) -> int:
     return int(team.get("server", {}).get("port", 8300))
 
 
+def _server_host(team: dict) -> str:
+    return str(team.get("server", {}).get("host", "127.0.0.1"))
+
+
+def _mcp_host(team: dict) -> str:
+    return str(team.get("mcp", {}).get("host", "127.0.0.1"))
+
+
 def _mcp_ports(team: dict) -> tuple[int, int]:
     mcp = team.get("mcp", {})
     return int(mcp.get("http_port", 8200)), int(mcp.get("sse_port", 8201))
@@ -148,9 +157,20 @@ def _kill_tmux_session(name: str) -> None:
 
 
 def _port_open(port: int) -> bool:
+    return _host_port_open("127.0.0.1", port)
+
+
+def _probe_host(host: str) -> str:
+    host = str(host or "127.0.0.1")
+    if host in ("0.0.0.0", "::"):
+        return "127.0.0.1"
+    return host
+
+
+def _host_port_open(host: str, port: int) -> bool:
     with socket.socket(socket.AF_INET, socket.SOCK_STREAM) as sock:
         sock.settimeout(0.2)
-        return sock.connect_ex(("127.0.0.1", port)) == 0
+        return sock.connect_ex((_probe_host(host), port)) == 0
 
 
 def _wait_for_port(port: int, timeout: float = 30.0) -> bool:
@@ -241,6 +261,11 @@ def _resolve_project_path(raw: str) -> Path:
 
 def _server_log_path(team: dict) -> Path:
     return _resolve_project_path(_data_dir(team)) / "server.log"
+
+
+def _tail_file(path: Path, lines: int) -> str:
+    with path.open("r", encoding="utf-8", errors="replace") as fh:
+        return "".join(deque(fh, maxlen=max(1, lines))).rstrip()
 
 
 def _command_with_server_log(command: str, log_path: Path) -> str:
@@ -468,16 +493,33 @@ def restart(args) -> None:
 
 
 def logs(args) -> None:
-    _check_tmux()
-    _team_file, _team, _name, prefix, _port, agents = _project_context(args)
+    _team_file, team, _name, prefix, _port, agents = _project_context(args)
     target = (args.target or "").strip()
     if not target:
         print("logs requires a target: server, <agent>, wrapper:<agent>, or raw tmux session")
         raise SystemExit(2)
+    lines = max(1, int(args.lines or 200))
+    if target == "server":
+        log_path = _server_log_path(team)
+        if log_path.exists():
+            out = _tail_file(log_path, lines)
+            if out:
+                print(out)
+            else:
+                print(f"(server log is empty: {log_path})")
+            return
+
+    _check_tmux()
     session = _resolve_target_session(prefix, agents, target)
     if not _tmux_session_exists(session):
-        raise SystemExit(f"tmux session not found: {session}")
-    lines = max(1, int(args.lines or 200))
+        hint = ""
+        if target == "server":
+            hint = f"\nPersisted server log not found: {_server_log_path(team)}"
+        elif target in agents:
+            _live, wrapper = _agent_sessions(prefix, target)
+            if _tmux_session_exists(wrapper):
+                hint = f"\nLive session is missing, but wrapper is running. Try: ./ac {args.project} logs wrapper:{target}"
+        raise SystemExit(f"tmux session not found: {session}{hint}")
     result = subprocess.run(
         ["tmux", "capture-pane", "-p", "-t", session, "-S", f"-{lines}"],
         capture_output=True,
@@ -514,30 +556,76 @@ def _print_attach_help(prefix: str, agents: list[str]) -> None:
     print("Wrapper supervisor sessions are available as wrapper:<agent> when debugging orchestration.")
 
 
+def _server_state(tmux_running: bool, listening: bool) -> str:
+    if tmux_running and listening:
+        return "running"
+    if listening:
+        return "listening"
+    if tmux_running:
+        return "tmux only"
+    return "stopped"
+
+
+def _agent_state(live_running: bool, wrapper_running: bool) -> str:
+    if live_running and wrapper_running:
+        return "running"
+    if wrapper_running:
+        return "wrapper only"
+    if live_running:
+        return "live only"
+    return "stopped"
+
+
 def status(args) -> None:
     _check_tmux()
     team_file, team, name, prefix, port, agents = _project_context(args)
     sessions = [s for s in _tmux_sessions() if s == prefix or s.startswith(prefix + "-")]
+    session_set = set(sessions)
+    server_session = f"{prefix}-server"
+    server_host = _server_host(team)
+    server_listening = _host_port_open(server_host, port)
+    http_port, sse_port = _mcp_ports(team)
+    mcp_host = _mcp_host(team)
+    http_listening = _host_port_open(mcp_host, http_port)
+    sse_listening = _host_port_open(mcp_host, sse_port)
+
     print(f"{name}")
     print(f"Team file: {team_file}")
-    print(f"Web UI: http://127.0.0.1:{port} ({'listening' if _port_open(port) else 'not listening'})")
-    server_session = f"{prefix}-server"
-    print(f"Server: {'running' if server_session in sessions else 'stopped'} ({server_session})")
-    print("Agent sessions:")
+    print(f"Tmux prefix: {prefix}")
+    print("Services:")
+    print(f"  {'Server':<10} {_server_state(server_session in session_set, server_listening):<11} {_probe_host(server_host)}:{port:<6} {server_session}")
+    print(f"  {'MCP HTTP':<10} {'listening' if http_listening else 'closed':<11} {_probe_host(mcp_host)}:{http_port}")
+    print(f"  {'MCP SSE':<10} {'listening' if sse_listening else 'closed':<11} {_probe_host(mcp_host)}:{sse_port}")
+    print("Agents:")
+    warnings: list[str] = []
+    expected_sessions = {server_session}
     for agent in agents:
         agent_session, wrapper_session = _agent_sessions(prefix, agent)
-        agent_state = "running" if agent_session in sessions else "stopped"
-        wrapper_state = "wrapper running" if wrapper_session in sessions else "wrapper stopped"
-        print(f"  {agent:<16} {agent_state:<8} {agent_session}  ({wrapper_state})")
+        expected_sessions.update((agent_session, wrapper_session))
+        live_running = agent_session in session_set
+        wrapper_running = wrapper_session in session_set
+        state = _agent_state(live_running, wrapper_running)
+        live_label = "live running" if live_running else "live stopped"
+        wrapper_label = "wrapper running" if wrapper_running else "wrapper stopped"
+        print(f"  {agent:<16} {state:<12} live={agent_session} ({live_label}); wrapper={wrapper_session} ({wrapper_label})")
+        if wrapper_running and not live_running:
+            warnings.append(f"{agent}: wrapper running without live agent session")
+        elif live_running and not wrapper_running:
+            warnings.append(f"{agent}: live agent session running without wrapper supervisor")
     extra = sorted(
         s for s in sessions
-        if s != server_session
-        and not any(s == f"{prefix}-{agent}" or s == f"{prefix}-wrap-{_slug(agent)}" for agent in agents)
+        if s not in expected_sessions
     )
     if extra:
-        print("Other sessions:")
+        print("Warnings:")
         for session in extra:
-            print(f"  {session}")
+            print(f"  running but not configured: {session}")
+        for warning in warnings:
+            print(f"  {warning}")
+    elif warnings:
+        print("Warnings:")
+        for warning in warnings:
+            print(f"  {warning}")
     print()
     print(f"Attach: ./ac {args.project} attach <agent>")
 
