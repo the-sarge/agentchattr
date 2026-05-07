@@ -619,3 +619,53 @@ launchers all run through `uv run`.
    cache-managed `UV_PROJECT_ENVIRONMENT`.
 3. Continue runner recovery ergonomics: one-agent restart polish, richer logs,
    and possible API-backed `./ac status`.
+
+---
+
+## 2026-05-07 11:12 EDT - Go Runner Documentation Refresh
+
+**Branch:** `main`
+**Base Commit:** `a6316fc`
+**Commits:** `a6316fc Add Go project runner`
+
+### Summary
+
+Refreshed project documentation after the `./ac` runner moved from the Python
+uv shim to the Go/Cobra implementation. The docs now describe the current
+runtime split: Go for the project runner, uv-managed Python for the server and
+wrappers, and `./ac-python` as the temporary fallback.
+
+### Decisions
+
+- Treat the Go runner as the default `./ac` path.
+- Keep release archives source-checkout friendly by packaging Go source and
+  module files instead of a platform-specific `ac` binary.
+- Keep `ac.py` and `./ac-python` documented as fallback until live smoke tests
+  prove the Go runner in daily use.
+
+### Changes
+
+- Updated README wording for the Go/Cobra runner and first-run Go dependency
+  fetch.
+- Updated `TEAM_RUNNER_GUIDE.md` with current runner requirements and fallback
+  path.
+- Updated `PROJECT_PLAN.md` current baseline, packaging phase, and near-term
+  sequence for the Go runner state.
+
+### Verification
+
+- Reviewed `README.md`, `PROJECT_PLAN.md`, `TEAM_RUNNER_GUIDE.md`, and
+  `DEV-JOURNAL.md` for stale runner/runtime references.
+- Ran `git diff --check`.
+
+### Open Questions
+
+- Whether future releases should include prebuilt `ac` binaries per platform or
+  continue with source-only Go execution.
+- When to remove `ac.py` and `./ac-python` after enough real runner smoke tests.
+
+### Next Steps
+
+1. Push `a6316fc`.
+2. Run a real `./ac <project> up/status/logs/down` smoke test.
+3. Run macOS/Linux and Windows launcher smoke tests.

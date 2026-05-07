@@ -23,6 +23,9 @@ frontend improvements, and follow-on hardening work.
 
 Implemented:
 
+- uv-only Python runtime via `pyproject.toml` and `uv.lock`
+- Go/Cobra `./ac` project runner
+- `./ac-python` fallback for the previous Python runner in `ac.py`
 - `./ac <project> up/status/attach/down/restart/logs/check`
 - `./ac list`
 - `./ac <project> up --dry-run`
@@ -41,6 +44,8 @@ Implemented:
 - detached wrapper startup for multi-agent launches
 - runner preflight for duplicate ports/prefixes, missing commands, bad paths,
   and team schema issues
+- release packaging for uv metadata, Go runner sources, launcher helpers, and
+  the Python runner fallback
 - persisted project server logs at `data_dir/server.log`
 - loop guard max/default increased to `100`
 - example team files for two-agent, large roster, API-agent, and project-a
@@ -253,22 +258,28 @@ Acceptance criteria:
 - Docker mode does not become required for normal host/tmux usage.
 - Credentials and project source mounts are explicit.
 
-## Phase 8: Packaging Later
+## Phase 8: Packaging And Distribution
 
-Objective: make installation cleaner after command shape stabilizes.
+Objective: make installation cleaner now that the command shape has stabilized
+around a Go runner and uv-managed Python runtime.
 
-Options:
+Current status:
 
-- keep `./ac` as the repo-local script
-- add a Taskfile as a thin wrapper around `./ac`
-- later add a Python console entry point or Go binary
+- `./ac` is the repo-local Go runner shim.
+- Go source is included in release archives instead of committing a
+  platform-specific binary.
+- `./ac-python` remains available as a fallback while Go runner parity settles.
+- Python runtime dependencies are locked with `uv.lock`.
 
-Recommendation:
+Recommended next packaging work:
 
-- Keep `./ac` for now.
-- Reconsider packaging once the command set has settled.
-- Consider a Go rewrite only for the runner if the Python script becomes a
-  stable, widely used CLI.
+- Keep source-checkout execution as the default for now.
+- Add platform-specific `ac` binaries to release artifacts only after real
+  macOS/Linux and Windows smoke tests.
+- Decide whether release archives should include both source and prebuilt
+  binaries, or source only plus a documented `go build ./cmd/ac` step.
+- Keep the Python fallback until the Go runner has covered live `up/status/logs`
+  smoke tests in daily use.
 
 ## Testing Strategy
 
@@ -287,6 +298,9 @@ Smoke tests:
 - project A down while project B remains running
 - seeded roles visible through API
 - status output contains expected tmux sessions
+- Go runner dry-run parity with the Python fallback
+- Go runner unit tests
+- uv-based Python runner regression tests
 
 Manual tests:
 
@@ -306,10 +320,11 @@ Manual tests:
 
 ## Near-Term Recommended Sequence
 
-1. Finish runner reliability polish around `restart`, `logs`, `list`, `check`,
-   and clear startup failure messages.
-2. Finish team TOML validation, dry-run output, duplicate port/prefix checks,
-   command checks, and path checks.
-3. Keep Agent Operations and project-awareness UI aligned with the runner's
-   tmux session model.
-4. Revisit Docker only after the host-based team runner feels stable.
+1. Push the current Go runner commit.
+2. Run a real `./ac <project> up/status/logs/down` smoke test with at least one
+   CLI agent.
+3. Run one normal macOS/Linux platform launcher smoke test after the uv
+   migration.
+4. Run a Windows launcher smoke test.
+5. Split `cmd/ac/main.go` into smaller packages once behavior parity is proven.
+6. Revisit Docker only after the host-based Go runner feels stable.

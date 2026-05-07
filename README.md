@@ -145,7 +145,8 @@ with the underlying agent running tools without interactive confirmation.
 
 `./ac` is the Go/Cobra project/team runner. It is intended for macOS/Linux
 because it uses `tmux` to keep the server, wrappers, and live agent terminals
-organized. The previous Python runner remains available as `./ac-python`.
+organized. The first run may download Go module dependencies. The previous
+Python runner remains available as `./ac-python`.
 
 Create a team file:
 

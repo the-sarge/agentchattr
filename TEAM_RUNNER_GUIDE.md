@@ -5,6 +5,20 @@ This guide covers the project/team workflow driven by `./ac`.
 The goal is to define a repeatable roster per project, then start, inspect,
 attach to, and stop that project without manually renaming agents in the UI.
 
+`./ac` is currently a Go/Cobra runner. It shells out to `tmux` for process
+control and still launches the Python server and wrappers through `uv`. The
+previous Python runner remains available as `./ac-python` while the Go runner
+settles.
+
+## Requirements
+
+- Go 1.24 or newer for `./ac`
+- `uv` for the Python server and wrappers that `./ac` launches
+- `tmux` on macOS/Linux
+- configured agent CLIs on `PATH`, unless a team uses only API agents
+
+The first `./ac` run may download Go module dependencies.
+
 ## Concepts
 
 A **team file** is a TOML file that defines one project-specific agentchattr
